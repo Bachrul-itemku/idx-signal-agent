@@ -8,6 +8,7 @@ perintah verifikasi yang bisa langsung diketik di bot.
 Angka entry/SL/TP HANYA dihitung di sini; AI tidak boleh mengubahnya."""
 import math
 import config
+import recipes
 from indicators import (volume_profile, enrich, round_tick, tick_size,
                         fractals, bullish_divergence)
 
@@ -19,6 +20,9 @@ NAMA = {
     "FCAAK": "🧲 FCAAK (jejak akumulasi)",
     "MA_GC": "✨ Golden Cross MA20/50",
     "STATS_REV": "↩️ Reversal dari low 52 minggu",
+    "BB_BOUNCE": "🟢 Pantul lower Bollinger (BB15)",
+    "GZ_FIBO": "🟡 Golden zone Fibo 90 hari",
+    "HBO_VOL": "🚀 Breakout high 20 hari + volume",
     "BPJS": "☀️ BPJS (beli pagi jual sore)",
     "BSJP": "🌙 BSJP (beli sore jual pagi)",
     "BPJS_LIVE": "⚡ BPJS live (beli pagi jual sore)",
@@ -34,6 +38,9 @@ VERIFIKASI = {
     "FCAAK": ["/C {k} P1,O5,I59,I106", "/MFQHIS {k}", "/PNBSRATIO {k} 5 3"],
     "MA_GC": ["/C {k} MA20,MA50,Z720", "/SCORE2 NGCSMA;20;50,AC3D,NF3D {k}"],
     "STATS_REV": ["/STATS {k}", "/SCORE2 HMR,ACREV,NBS1 {k}"],
+    "BB_BOUNCE": ["/C {k} P1,O5,I59,I106", "/SCORE2 BB15,NBS1 {k}"],
+    "GZ_FIBO": ["/FIBO90 {k}", "/SCORE2 GZFIBO90,NBS1 {k}"],
+    "HBO_VOL": ["/C {k} MA20,MA50", "/SCORE2 HBO;20,VSPIKE1,NBS1 {k}"],
     "BPJS": ["malam: /SCORE2 NBS1,NF1D {k}", "pagi 09.15: /MFQ {k} 1", "pagi: /BOR {k}"],
     "BSJP": ["/BOR {k}", "/MFQ {k} 1", "/SCORE2 BPR;2,NBS1;1 {k}"],
     "BPJS_LIVE": ["/BOR {k}", "/MFQ {k} 1", "/SCORE2 OL,BPR;3,TF {k}"],
@@ -71,6 +78,7 @@ def _filters(df) -> dict:
         "HAMMER": (min(c, o) - l) >= 2 * body and (h - max(c, o)) <= max(body, t) and (c - l) / rng >= 0.6,
         "KOKO": vol_ratio > 1 and value_m > 1 and chg > 2,  # vol>MA20, value>1M, naik>2%
         "VSPIKE1": vol_ratio >= 2 and c > o,
+        "PASMA5": c > last["MA5"],
         "PASMA20": c > last["MA20"],
         "PASMA50": c > last["MA50"],
         "TVAL1": value_m >= 1, "TVAL3": value_m >= 3, "TVAL5": value_m >= 5,
@@ -141,54 +149,57 @@ def session_fraction(now) -> float:
     return max(done / total, 0.05)
 
 
-def _live_base(df, frac):
-    """Angka dasar untuk candle hari ini yang belum selesai."""
-    df = enrich(df)
-    last, prev = df.iloc[-1], df.iloc[-2]
-    c, o, h, l, v = (float(last["Close"]), float(last["Open"]), float(last["High"]),
-                     float(last["Low"]), float(last["Volume"]))
-    vol_avg = float(df["Volume"].iloc[-21:-1].mean())        # rata-rata 20 hari SEBELUM hari ini
-    val_avg = float((df["Close"] * df["Volume"]).iloc[-21:-1].mean()) / 1e9
+def bar_view(dfe, i: int = -1, frac: float = 1.0) -> dict:
+    """Angka candle ke-i dari df yang sudah di-enrich. Rata-rata memakai hari SEBELUMNYA,
+    jadi bisa dipakai untuk candle yang belum selesai (live) maupun backtest."""
+    row = dfe.iloc[i]
+    c, o, h, l, v = (float(row["Close"]), float(row["Open"]), float(row["High"]),
+                     float(row["Low"]), float(row["Volume"]))
+    p1, p2 = float(dfe["Close"].iloc[i - 1]), float(dfe["Close"].iloc[i - 2])
+    vol_avg = float(row["VolAvgPrev"]) if row["VolAvgPrev"] == row["VolAvgPrev"] else 0
     return {
-        "df": df, "c": c, "o": o, "h": h, "l": l, "prev": float(prev["Close"]),
-        "ma20": float(df["Close"].iloc[-21:-1].mean()),
-        "chg": (c / float(prev["Close"]) - 1) * 100,
-        "value_m": c * v / 1e9, "val_avg": val_avg,
-        "vol_adj": v / (vol_avg * frac) if vol_avg else 0,   # >1 = lebih ramai dari biasanya
-        "rsi": float(df["RSI"].iloc[-1]),
+        "c": c, "o": o, "h": h, "l": l, "prev": p1, "frac": frac, "tick": tick_size(c),
+        "chg": (c / p1 - 1) * 100,
+        "value_m": c * v / 1e9, "val_avg": float(row["ValAvgPrev"]) / 1e9,
+        "vol_adj": v / (vol_avg * frac) if vol_avg else 0,
+        "ma5": float(row["MA5prev"]), "ma20": float(row["MA20prev"]),
+        "hc2d": c > p1 > p2, "near_high": (h - c) / c <= 0.01,
+        "rsi": float(row["RSI"]), "tanggal": str(dfe.index[i].date()),
     }
 
 
 def _pack(kode, b, tipe, mode, skor, alasan, plan):
     return {
-        "kode": kode, "tanggal": str(b["df"].index[-1].date()), "close": b["c"],
+        "kode": kode, "tanggal": b["tanggal"], "close": b["c"],
         "chg_pct": round(b["chg"], 2), "vol_ratio": round(b["vol_adj"], 2),
         "value_miliar": round(b["value_m"], 2), "rsi": round(b["rsi"], 1),
         "signal": {"tipe": tipe, "skor": skor, "mode": mode, "alasan": alasan, **plan},
     }
 
 
-def bsjp(kode: str, df, frac: float = 1.0) -> dict | None:
-    """BSJP live (15.00–15.50 WIB), candle hari ini belum selesai.
-    Resep skill: /SCORE100 IJO,CH,KOKO,PASMA;20,TVAL;5,BPR;2,PCH;2;15 (BPR dicek di bot).
-    Volume & nilai disesuaikan dengan porsi jam bursa yang sudah lewat."""
-    if len(df) < 30:
+def bsjp_dari_bar(kode, b, resep: str) -> dict | None:
+    if b["c"] < config.MIN_PRICE or b["val_avg"] < config.MIN_VALUE_MILIAR:
         return None
-    b = _live_base(df, frac)
-    c = b["c"]
-    if c < config.MIN_PRICE or b["val_avg"] < config.MIN_VALUE_MILIAR:
-        return None
-    core = (c > b["o"] and c > b["ma20"] and 2 <= b["chg"] <= 15      # IJO, PASMA20, PCH 2–15
-            and b["vol_adj"] > 1 and b["value_m"] >= 5 * frac)          # KOKO & TVAL5 versi parsial
+    core, bonus = recipes.BSJP[resep][1](b)
     if not core:
         return None
-    near_high = (b["h"] - c) / c <= 0.01                                # versi longgar CH
-    df2 = b["df"]
-    hc2d = c > df2["Close"].iloc[-2] > df2["Close"].iloc[-3]
-    bonus = [near_high, b["vol_adj"] >= 2, b["value_m"] >= 10 * frac, hc2d]
-    alasan = ("Dekat high hari ini" if near_high else "Naik tapi agak jauh dari high") + \
-             f", volume {b['vol_adj']:.1f}x normal".replace(".", ",")
-    return _pack(kode, b, "BSJP", "bsjp", _score(True, bonus), alasan, plan_bsjp(c, b["l"]))
+    alasan = (f"Resep {resep}; " + ("dekat high hari ini" if b["near_high"] else "agak jauh dari high")
+              + f", volume {b['vol_adj']:.1f}x normal".replace(".", ","))
+    return {
+        "kode": kode, "tanggal": b["tanggal"], "close": b["c"],
+        "chg_pct": round(b["chg"], 2), "vol_ratio": round(b["vol_adj"], 2),
+        "value_miliar": round(b["value_m"], 2), "rsi": round(b["rsi"], 1),
+        "signal": {"tipe": "BSJP", "skor": _score(True, bonus), "mode": "bsjp", "resep": resep,
+                   "alasan": alasan, **plan_bsjp(b["c"], b["l"])},
+    }
+
+
+def bsjp(kode: str, df, frac: float = 1.0, resep: str | None = None) -> dict | None:
+    """BSJP live (15.00–15.50 WIB) dengan resep aktif dari strategi.json."""
+    if len(df) < 30:
+        return None
+    b = bar_view(enrich(df), -1, frac)
+    return bsjp_dari_bar(kode, b, resep or recipes.DEFAULT["BSJP"])
 
 
 def plan_bpjs_live(price: float, open_: float) -> dict:
@@ -211,7 +222,7 @@ def bpjs_live(kode: str, df, frac: float, watch_semalam: set) -> dict | None:
     /SCORE100 OL,BPR;3,TF,VSPIKE1,TVAL;3,PASMA;20,PCH;1;5 (BPR & TF dicek di bot)."""
     if len(df) < 30:
         return None
-    b = _live_base(df, frac)
+    b = bar_view(enrich(df), -1, frac)
     c, o, l = b["c"], b["o"], b["l"]
     if c < config.MIN_PRICE or b["val_avg"] < config.MIN_VALUE_MILIAR:
         return None
@@ -235,7 +246,9 @@ def _score(core_ok: bool, bonus: list[bool]) -> int:
     return round(50 + 50 * sum(bonus) / len(bonus)) if bonus else 100
 
 
-def analyze(kode: str, df) -> dict | None:
+def analyze(kode: str, df, aktif: dict | None = None) -> dict | None:
+    """aktif = isi strategi.json (resep BPJS & daftar tipe swing yang dipakai).
+    aktif=None: semua tipe swing dihitung (dipakai backtest)."""
     if len(df) < max(config.VP_LOOKBACK, 130):
         return None
     df = enrich(df)
@@ -331,14 +344,33 @@ def analyze(kode: str, df) -> dict | None:
     add("STATS_REV", _score(core, [f["HAMMER"], f["VSPIKE1"], f["RSI_DIV"], f["TVAL3"]]),
         _plan(c, sl, round_tick(c + 2 * (c - sl))), alasan=f"Memantul dari low 52 minggu {rp(lo52)}")
 
-    # 8) BPJS — screening malam (versi tanpa NBS1/NF1D), dieksekusi besok pagi
-    keys = ["IJO", "KOKO", "PASMA20", "HC2D", "TVAL3", "PCH_2_8", "VSPIKE1", "HHHL"]
-    skor = round(100 * sum(f[k] for k in keys) / len(keys))
-    if skor >= 75 and f["IJO"] and f["PASMA20"] and f["TVAL3"]:
-        add("BPJS", skor, plan_bpjs(c), mode="next_day",
-            alasan=f"{sum(f[k] for k in keys)}/8 filter BPJS lolos")
+    # 8) Swing tambahan dari katalog FCAAK/HQ (ikut diuji tiap minggu)
+    # BB15: pantul dari lower band
+    core = f["NEAR_LOWER_BB"] and c > float(last["BB_low"]) and f["IJO"] and not near_poc
+    sl = round_tick(l - 2 * t)
+    add("BB_BOUNCE", _score(core, [f["HAMMER"], f["RSI_DIV"], f["VSPIKE1"], f["TVAL3"]]),
+        _plan(c, sl, round_tick(float(last["BB_mid"]))) or _plan(c, sl, round_tick(c + 2 * (c - sl))),
+        alasan="Memantul dari lower Bollinger Band (BB15)")
+    # GZFIBO90: di golden zone 61,8–78,6% + candle hijau
+    core = f["FIB_GZ"] and f["IJO"] and f["TVAL1"]
+    lo90 = float(df["Low"].tail(90).min())
+    sl = round_tick(lo90 - 2 * t)
+    add("GZ_FIBO", _score(core, [f["HAMMER"], f["RSI_DIV"], f["PASMA50"], f["VSPIKE1"]]),
+        _plan(c, sl, round_tick(c + 2 * (c - sl))), alasan="Di golden zone Fibo 90 hari (GZFIBO90)")
+    # HBO;20 + VSPIKE1: tembus high 20 hari dengan volume
+    hi20 = float(df["High"].iloc[-21:-1].max())
+    core = c > hi20 and float(prev["Close"]) <= hi20 and f["VSPIKE1"] and f["TVAL3"]
+    sl = round_tick(float(df["Low"].tail(10).min()) - 2 * t)
+    add("HBO_VOL", _score(core, [f["CH"], f["PASMA50"], f["HHHL"], f["TVAL5"]]),
+        _plan(c, sl, round_tick(c + 2 * (c - sl))), alasan=f"Tembus high 20 hari {rp(hi20)} dengan volume")
 
-    # 9) Peringatan exit: FR5 (fractal hijau jebol) atau breakdown VAL
+    # 9) BPJS — screening malam dengan resep aktif, dieksekusi besok pagi
+    resep_bpjs = (aktif or recipes.DEFAULT)["BPJS"]
+    skor = recipes.BPJS[resep_bpjs][1](f)
+    if skor:
+        add("BPJS", skor, {**plan_bpjs(c), "resep": resep_bpjs}, mode="next_day", alasan=f"Resep {resep_bpjs}")
+
+    # 10) Peringatan exit: FR5 (fractal hijau jebol) atau breakdown VAL
     alasan = []
     if last_green and c < last_green and prev["Close"] >= last_green:
         alasan.append(f"FR5: jebol fractal hijau {rp(last_green)}")
@@ -347,5 +379,7 @@ def analyze(kode: str, df) -> dict | None:
     if alasan:
         add("EXIT_WARNING", 100, mode="warning", alasan="; ".join(alasan))
 
+    if aktif is not None:                                   # hanya tipe swing yang aktif
+        out = [x for x in out if x["mode"] != "swing" or x["tipe"] in aktif["SWING"]]
     info["signals"] = sorted(out, key=lambda s: -s["skor"])
     return info

@@ -101,4 +101,10 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
     sd = c.rolling(20).std(ddof=0)
     df["BB_mid"], df["BB_up"], df["BB_low"] = df["MA20"], df["MA20"] + 2 * sd, df["MA20"] - 2 * sd
     df["BB_width"] = (df["BB_up"] - df["BB_low"]) / df["BB_mid"]
+    df["MA5"] = c.rolling(5).mean()
+    # Rata-rata SEBELUM hari ini (dipakai untuk candle yang belum selesai & backtest)
+    df["MA5prev"] = c.shift(1).rolling(5).mean()
+    df["MA20prev"] = c.shift(1).rolling(20).mean()
+    df["VolAvgPrev"] = df["Volume"].shift(1).rolling(20).mean()
+    df["ValAvgPrev"] = df["Value"].shift(1).rolling(20).mean()
     return df

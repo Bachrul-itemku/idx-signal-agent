@@ -3,6 +3,7 @@
   python main.py bpjs     pantau BPJS live (09.00–11.00 WIB), kirim kandidat baru
   python main.py bsjp     pantau BSJP live (15.00–15.50 WIB), kirim kandidat baru
   python main.py auto     pilih tugas otomatis sesuai jam WIB (dipakai jadwal GitHub)
+  python main.py evaluasi evaluasi mingguan: nilai performa, backtest resep lain, ganti otomatis
   python main.py stats    rapor winrate (mis. tiap Jumat malam)
 """
 import html
@@ -12,6 +13,7 @@ import config
 import data
 import journal
 import signals
+import strategi
 import telegram_send
 import universe
 
@@ -106,10 +108,11 @@ def run_scan():
             cache[kode] = data.fetch(kode)
         return cache[kode]
 
+    aktif = strategi.load()
     all_info, swing_c, bpjs_c, warnings = {}, [], [], []
     for kode, df in cache.items():
         try:
-            info = signals.analyze(kode, df)
+            info = signals.analyze(kode, df, aktif)
         except Exception as e:
             print(f"[signals] {kode} dilewati: {e}")
             continue
@@ -217,12 +220,13 @@ def run_live(kind: str, uji: bool = False):
         return
 
     semalam = journal.bpjs_semalam(today) if kind == "bpjs" else set()
+    resep_bsjp = strategi.load()["BSJP"]
     hasil = []
     for kode, df in cache.items():
         if str(df.index[-1].date()) != today:
             continue
         try:
-            r = signals.bpjs_live(kode, df, frac, semalam) if kind == "bpjs" else signals.bsjp(kode, df, frac)
+            r = signals.bpjs_live(kode, df, frac, semalam) if kind == "bpjs" else signals.bsjp(kode, df, frac, resep_bsjp)
         except Exception as e:
             print(f"[{kind}] {kode} dilewati: {e}")
             continue
@@ -277,6 +281,9 @@ if __name__ == "__main__":
         run_live(cmd)
     elif cmd in ("bsjp-uji", "bpjs-uji"):
         run_live(cmd.split("-")[0], uji=True)
+    elif cmd == "evaluasi":
+        import evaluasi
+        evaluasi.run()
     elif cmd == "auto":
         run_auto()
     else:

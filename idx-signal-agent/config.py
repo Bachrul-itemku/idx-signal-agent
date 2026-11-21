@@ -26,6 +26,12 @@ MAX_PER_LIST = 10            # maksimal saham di daftar BSJP / BPJS
 MAX_AI_CANDIDATES = 40       # kandidat terbaik yang ditinjau AI (hemat biaya)
 MIN_PRICE = 51               # abaikan saham gocap (harga 50)
 
+# Evaluasi mingguan & ganti resep otomatis
+AUTO_SWITCH = (os.getenv("AUTO_SWITCH") or "1") == "1"   # 0 = hanya usulkan
+FEE_PCT = 0.4                # perkiraan fee beli+jual (%) dipotong dari hasil
+BT_HARI = 126                # panjang backtest (±6 bulan bursa)
+BT_MAX_SAHAM = 400           # saham paling likuid yang diuji (supaya cepat)
+
 # Money management (seperti /MM di bot): lot dihitung dari modal & risiko per trade
 MODAL_RP = float(os.getenv("MODAL_RP") or "10000000")   # 10 juta
 RISK_PCT = float(os.getenv("RISK_PCT") or "2")          # 2% per trade

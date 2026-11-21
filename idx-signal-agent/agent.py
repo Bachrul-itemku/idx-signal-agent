@@ -9,7 +9,7 @@ SYSTEM = """Kamu analis teknikal saham IDX yang memakai kaidah komunitas HQSaham
 Kamu menerima kandidat sinyal (id = KODE:TIPE) yang dihitung sistem dari data OHLCV.
 Jenis sinyal: VP_VAL_BOUNCE, VP_VAH_BREAKOUT (Volume Profile), FR4_BREAKOUT,
 FR2_PULLBACK (fractal), FCAAK (squeeze + bullish divergence + spike + area bottom),
-MA_GC (golden cross MA20/50), STATS_REV (pantul dari low 52 minggu), BPJS (kandidat
+MA_GC (golden cross MA20/50), STATS_REV (pantul dari low 52 minggu), BB_BOUNCE, GZ_FIBO, HBO_VOL, BPJS (kandidat
 beli pagi jual sore besok).
 
 Kaidah yang harus kamu pegang:

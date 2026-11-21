@@ -6,7 +6,8 @@
 - **15.00–15.50 WIB, tiap ±10 menit: BSJP live.** Syarat: hijau, di atas MA20, naik 2–15%, volume di atas normal, nilai transaksi besar. Dikirim dengan harga masuk (s.d. 15.49), target besok pagi +2%/+3%, dan cut.
 - Saham yang sudah dikirim tidak dikirim ulang di hari yang sama. Kalau tidak ada yang baru, bot diam.
 - **18.47 WIB**: daftar **BPJS besok** (jadi ⭐ prioritas di BPJS live pagi) + sinyal swing + peringatan exit untuk saham di `WATCHLIST`.
-- **Jumat 20.13 WIB**: rapor winrate.
+- **Sabtu 08.13 WIB: evaluasi mingguan.** Menilai hasil live minggu ini vs 4 minggu sebelumnya, lalu backtest ±6 bulan semua varian resep (4 BSJP, 4 BPJS malam, 10 tipe swing) di 400 saham terlikuid, dipotong fee 0,4%/trade. Kalau resep aktif menurun dan ada varian yang unggul di 6 bulan DAN 4 minggu terakhir (min. 30 trade, rata-rata positif), resep diganti otomatis di `strategi.json` dan dilaporkan ke Telegram. Kategori yang sama tidak diganti lagi dalam 2 minggu. Matikan dengan variabel `AUTO_SWITCH=0` (jadi hanya usulan).
+- Rapor winrate kapan saja: Run workflow dengan perintah `stats`.
 - `UNIVERSE=WATCHLIST` (variabel GitHub) kalau mau kembali hanya memindai watchlist.
 
 Memindai watchlist tiap sore, menghitung Volume Profile (POC/VAH/VAL), lalu mengirim sinyal ke Telegram.

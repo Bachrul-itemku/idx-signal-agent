@@ -37,7 +37,7 @@ def conn():
     c = sqlite3.connect(config.DB_PATH)
     c.execute(SCHEMA)
     cols = {r[1] for r in c.execute("PRAGMA table_info(signals)")}
-    for col, typ in [("skor", "INTEGER"), ("mode", "TEXT")]:   # migrasi DB versi lama
+    for col, typ in [("skor", "INTEGER"), ("mode", "TEXT"), ("resep", "TEXT")]:   # migrasi DB lama
         if col not in cols:
             c.execute(f"ALTER TABLE signals ADD COLUMN {col} {typ}")
     return c
@@ -48,11 +48,11 @@ def save(info: dict, ai_pick: int | None, komentar: str = "") -> bool:
     s = info["signal"]
     with conn() as c:
         cur = c.execute("""INSERT OR IGNORE INTO signals
-            (tanggal,kode,tipe,close,entry,sl,tp1,rr,rsi,vol_ratio,skor,mode,ai_pick,ai_komentar,created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (tanggal,kode,tipe,close,entry,sl,tp1,rr,rsi,vol_ratio,skor,mode,resep,ai_pick,ai_komentar,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (info["tanggal"], info["kode"], s["tipe"], info["close"], s.get("entry"),
              s.get("sl"), s.get("tp1"), s.get("rr"), info["rsi"], info["vol_ratio"],
-             s.get("skor"), s.get("mode", "swing"),
+             s.get("skor"), s.get("mode", "swing"), s.get("resep"),
              ai_pick, komentar, datetime.now().isoformat(timespec="seconds")))
         return cur.rowcount == 1
 
