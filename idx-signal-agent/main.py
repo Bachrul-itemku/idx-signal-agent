@@ -201,13 +201,17 @@ def run_scan():
     telegram_send.send("\n\n".join(parts))
 
 
-def run_live(kind: str):
+def run_live(kind: str, uji: bool = False):
     """Pemantauan berkala: kind = 'bpjs' (09.00–11.00) atau 'bsjp' (15.00–15.50).
-    Hanya mengirim saham yang BARU muncul hari itu."""
+    Hanya mengirim saham yang BARU muncul hari itu.
+    uji=True: pakai hari bursa terakhir (untuk mencoba di luar jam bursa), tidak dicatat."""
     wib = now_wib()
     today = wib.date().isoformat()
     frac = signals.session_fraction(wib - timedelta(minutes=15))     # data Yahoo telat ±15 menit
     cache = load_data(period="3mo")
+    if uji:
+        today = max(str(df.index[-1].date()) for df in cache.values())
+        frac = 1.0 if kind == "bsjp" else signals.session_fraction(wib.replace(hour=10, minute=0))
     if not any(str(df.index[-1].date()) == today for df in cache.values()):
         print("Belum ada data hari ini (libur bursa / data belum masuk), tidak kirim.")
         return
@@ -230,14 +234,17 @@ def run_live(kind: str):
     for r in hasil:                                     # simpan & kirim hanya yang baru, maks 10 per pesan
         if len(baru) >= config.MAX_PER_LIST:
             break
-        if journal.save(r, None):
+        if uji or journal.save(r, None):
             baru.append(r)
     print(f"[{kind}] {len(hasil)} kandidat, {len(baru)} baru")
     if not baru:
         return                                          # tidak ada yang baru: diam saja
 
     judul = "⚡ <b>BPJS live</b>" if kind == "bpjs" else "🌙 <b>BSJP live</b>"
-    parts = [f"{judul} · {today} · data ±{(wib - timedelta(minutes=15)):%H.%M} WIB · {len(baru)} saham baru",
+    if uji:
+        judul = "🧪 UJI · " + judul
+    jam = "data penutupan (mode uji)" if uji else f"data ±{(wib - timedelta(minutes=15)):%H.%M} WIB"
+    parts = [f"{judul} · {today} · {jam} · {len(baru)} saham baru",
              "Harga dari data yang telat ±15 menit. Cek harga live & antrean sebelum beli."]
     if kind == "bsjp" and wib.weekday() == 4:
         parts.append("⚠️ Hari Jumat: komunitas HQ menyarankan hindari BSJP (risiko libur akhir pekan).")
@@ -268,6 +275,8 @@ if __name__ == "__main__":
         telegram_send.send(journal.stats_text())
     elif cmd in ("bsjp", "bpjs"):
         run_live(cmd)
+    elif cmd in ("bsjp-uji", "bpjs-uji"):
+        run_live(cmd.split("-")[0], uji=True)
     elif cmd == "auto":
         run_auto()
     else:
