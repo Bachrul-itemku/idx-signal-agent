@@ -2,12 +2,18 @@ name: Sinyal Saham IDX
 
 on:
   schedule:
-    - cron: "47 11 * * 1-5"   # Senin–Jumat 18.47 WIB
-    - cron: "13 13 * * 5"     # Jumat 20.13 WIB: rapor winrate
+    # Waktu dalam UTC (WIB = UTC+7). GitHub bisa molor 5–30 menit; main.py auto
+    # memilih tugas sesuai jam WIB saat benar-benar jalan.
+    - cron: "3-53/10 2-3 * * 1-5"   # 09.03–10.53 WIB tiap 10 menit: BPJS live
+    - cron: "3 4 * * 1-5"           # 11.03 WIB: BPJS live terakhir
+    - cron: "58 7 * * 1-5"          # 14.58 WIB: BSJP live
+    - cron: "8-48/10 8 * * 1-5"     # 15.08–15.48 WIB tiap 10 menit: BSJP live
+    - cron: "47 11 * * 1-5"         # 18.47 WIB: swing + daftar BPJS besok
+    - cron: "13 13 * * 5"           # Jumat 20.13 WIB: rapor winrate
   workflow_dispatch:
     inputs:
       perintah:
-        description: "scan atau stats"
+        description: "scan, bpjs, bsjp, stats, atau auto"
         default: scan
 
 permissions:
@@ -19,12 +25,12 @@ concurrency:
 
 defaults:
   run:
-    working-directory: idx-signal-agent
-    
+    working-directory: idx-signal-agent   # semua file Python ada di folder ini
+
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -42,22 +48,28 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WATCHLIST: ${{ vars.WATCHLIST }}
+          UNIVERSE: ${{ vars.UNIVERSE }}
           MODAL_RP: ${{ vars.MODAL_RP }}
           RISK_PCT: ${{ vars.RISK_PCT }}
           SKIP_STALE: ${{ github.event_name == 'schedule' && '1' || '0' }}
         run: |
-          if [ "${{ github.event.schedule }}" = "13 13 * * 5" ] || [ "${{ inputs.perintah }}" = "stats" ]; then
+          JADWAL="${{ github.event.schedule }}"
+          PERINTAH="${{ inputs.perintah }}"
+          if [ "$JADWAL" = "13 13 * * 5" ]; then
             python main.py stats
+          elif [ -n "$JADWAL" ]; then
+            python main.py auto
           else
-            python main.py
+            python main.py "${PERINTAH:-scan}"
           fi
 
-      - name: Simpan jurnal (signals.db)
+      - name: Simpan jurnal & daftar saham
         run: |
-          if [ -f signals.db ] && [ -n "$(git status --porcelain signals.db)" ]; then
+          for f in signals.db tickers.txt; do if [ -f "$f" ]; then git add "$f"; fi; done
+          if ! git diff --cached --quiet; then
             git config user.name "sinyal-bot"
             git config user.email "sinyal-bot@users.noreply.github.com"
-            git add signals.db
             git commit -m "Update jurnal sinyal $(date -u +%F)"
+            git pull --rebase -q || true
             git push
           fi

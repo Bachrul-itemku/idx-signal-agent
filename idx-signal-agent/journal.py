@@ -6,11 +6,15 @@ Asumsi evaluasi (sengaja konservatif):
   Kalau SL dan TP1 tersentuh di hari yang sama, dianggap LOSS (tidak tahu mana duluan).
 - Lewat MAX_HOLD hari bursa tanpa kena keduanya -> EXPIRED di harga close.
 - Peringatan exit dinilai BENAR kalau close 5 hari bursa kemudian lebih rendah.
-- BPJS (mode next_day): entry = open besok; WIN kalau high besok >= open +2,5%,
-  selain itu dijual di close besok (untung/rugi sesuai close).
+- BPJS: hanya dihitung kalau open besok di antara close dan close+3% (SKIP kalau tidak).
+  Entry = open; LOSS kalau low <= close-2%; WIN kalau high >= open+2,5%; selain itu jual di close.
+- BPJS live: entry = harga saat alert; LOSS kalau low hari itu <= SL (di bawah open);
+  WIN kalau high >= entry+2,5% (tidak tahu urutan intraday, jadi perkiraan kasar); selain itu jual di close.
+- BSJP: entry = close hari sinyal; besok WIN kalau open/high >= entry+2%; LOSS kalau low <= SL;
+  selain itu dianggap dijual di harga open.
 """
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import config
 
@@ -39,35 +43,76 @@ def conn():
     return c
 
 
-def save(info: dict, ai_pick: int | None, komentar: str = "") -> None:
+def save(info: dict, ai_pick: int | None, komentar: str = "") -> bool:
+    """Simpan sinyal. Return True kalau baru (belum pernah tercatat hari itu)."""
     s = info["signal"]
     with conn() as c:
-        c.execute("""INSERT OR IGNORE INTO signals
+        cur = c.execute("""INSERT OR IGNORE INTO signals
             (tanggal,kode,tipe,close,entry,sl,tp1,rr,rsi,vol_ratio,skor,mode,ai_pick,ai_komentar,created_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (info["tanggal"], info["kode"], s["tipe"], info["close"], s.get("entry"),
              s.get("sl"), s.get("tp1"), s.get("rr"), info["rsi"], info["vol_ratio"],
              s.get("skor"), s.get("mode", "swing"),
              ai_pick, komentar, datetime.now().isoformat(timespec="seconds")))
+        return cur.rowcount == 1
 
 
 def _evaluate(row: dict, df: pd.DataFrame) -> dict | None:
+    if row.get("mode") == "bpjs_live":         # beli & jual di hari yang sama
+        day = df[df.index == pd.Timestamp(row["tanggal"])]
+        wib = datetime.now(timezone.utc) + timedelta(hours=7)
+        if day.empty or (row["tanggal"] == wib.date().isoformat() and wib.hour < 17):
+            return None                          # tunggu candle hari itu selesai
+        bar, e = day.iloc[0], row["entry"]
+        if bar["Low"] <= row["sl"]:              # konservatif: anggap kena cut dulu
+            px, status = row["sl"], "LOSS"
+        elif bar["High"] >= row["tp1"]:
+            px, status = row["tp1"], "WIN"
+        else:
+            px = float(bar["Close"])
+            status = "WIN" if px > e else "LOSS"
+        return {"status": status, "exit_date": row["tanggal"], "exit_price": px,
+                "result_pct": round((px / e - 1) * 100, 2), "hold_days": 0}
+
     after = df[df.index > pd.Timestamp(row["tanggal"])]
     if after.empty:
         return None
 
     mode = row.get("mode") or ("warning" if row["tipe"] in ("VAL_BREAKDOWN", "EXIT_WARNING") else "swing")
 
-    if mode == "next_day":
+    if mode == "next_day":                     # BPJS: beli besok pagi
         bar = after.iloc[0]
-        o = float(bar["Open"])
-        if bar["High"] >= o * 1.025:
-            px, status = o * 1.025, "WIN"
+        o, close0 = float(bar["Open"]), row["close"]
+        base = {"exit_date": str(after.index[0].date()), "hold_days": 1}
+        if o < close0 or o > close0 * 1.03:      # syarat masuk tidak terpenuhi
+            return {**base, "status": "SKIP", "exit_price": o, "result_pct": 0.0}
+        tp, sl = o * 1.025, close0 * 0.98
+        if bar["Low"] <= sl:                     # konservatif: anggap kena cut dulu
+            px, status = sl, "LOSS"
+        elif bar["High"] >= tp:
+            px, status = tp, "WIN"
         else:
             px = float(bar["Close"])
             status = "WIN" if px > o else "LOSS"
+        return {**base, "status": status, "exit_price": px, "result_pct": round((px / o - 1) * 100, 2)}
+
+    if mode == "bsjp":                         # BSJP: beli di close, jual besok pagi
+        day = df[df.index == pd.Timestamp(row["tanggal"])]
+        entry = float(day["Close"].iloc[0]) if len(day) else row["close"]
+        bar = after.iloc[0]
+        o = float(bar["Open"])
+        tp, sl = entry * 1.02, row["sl"] or entry * 0.97
+        if o >= tp:
+            px, status = o, "WIN"
+        elif bar["High"] >= tp:
+            px, status = tp, "WIN"
+        elif bar["Low"] <= sl:
+            px, status = sl, "LOSS"
+        else:
+            px = o                               # jual pagi, didekati dengan harga open
+            status = "WIN" if px > entry else "LOSS"
         return {"status": status, "exit_date": str(after.index[0].date()), "exit_price": px,
-                "result_pct": round((px / o - 1) * 100, 2), "hold_days": 1}
+                "result_pct": round((px / entry - 1) * 100, 2), "hold_days": 1}
 
     if mode == "warning":
         if len(after) < 5:
@@ -116,6 +161,7 @@ def stats() -> dict:
     with conn() as c:
         df = pd.read_sql("SELECT * FROM signals", c)
     out = {"total": len(df), "open": int((df["status"] == "OPEN").sum()) if len(df) else 0,
+           "skip": int((df["status"] == "SKIP").sum()) if len(df) else 0,
            "per_tipe": [], "ai": []}
     if df.empty:
         return out
@@ -149,7 +195,8 @@ def _summary(name, g):
 def stats_text() -> str:
     s = stats()
     lines = ["📈 <b>Rapor Sinyal</b>",
-             f"Total tercatat {s['total']} · masih berjalan {s['open']}"]
+             f"Total tercatat {s['total']} · masih berjalan {s['open']} · "
+             f"BPJS batal (syarat open tidak terpenuhi) {s['skip']}"]
     if not s["per_tipe"] and "breakdown" not in s:
         lines.append("\nBelum ada sinyal yang selesai dievaluasi.")
         return "\n".join(lines)
@@ -169,6 +216,15 @@ def stats_text() -> str:
         lines.append("\n<b>Efek filter AI</b>")
         lines += [row(x) for x in s["ai"]]
     lines.append("\n<i>Asumsi: swing entry di close hari sinyal, SL/TP di level persis, "
-                 f"maks {config.MAX_HOLD_DAYS} hari bursa; BPJS entry di open besok. "
+                 f"maks {config.MAX_HOLD_DAYS} hari bursa; BPJS entry di open besok, BSJP di close. "
                  "Belum termasuk fee & slippage.</i>")
     return "\n".join(lines)
+
+
+def bpjs_semalam(before: str) -> set[str]:
+    """Kode di daftar BPJS dari scan malam terakhir sebelum tanggal `before`."""
+    with conn() as c:
+        row = c.execute("SELECT MAX(tanggal) FROM signals WHERE tipe='BPJS' AND tanggal < ?", (before,)).fetchone()
+        if not row or not row[0]:
+            return set()
+        return {r[0] for r in c.execute("SELECT kode FROM signals WHERE tipe='BPJS' AND tanggal=?", (row[0],))}

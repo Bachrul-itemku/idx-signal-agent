@@ -19,7 +19,9 @@ NAMA = {
     "FCAAK": "🧲 FCAAK (jejak akumulasi)",
     "MA_GC": "✨ Golden Cross MA20/50",
     "STATS_REV": "↩️ Reversal dari low 52 minggu",
-    "BPJS": "☀️ Kandidat BPJS besok pagi",
+    "BPJS": "☀️ BPJS (beli pagi jual sore)",
+    "BSJP": "🌙 BSJP (beli sore jual pagi)",
+    "BPJS_LIVE": "⚡ BPJS live (beli pagi jual sore)",
     "EXIT_WARNING": "🔴 Peringatan exit",
 }
 
@@ -33,6 +35,8 @@ VERIFIKASI = {
     "MA_GC": ["/C {k} MA20,MA50,Z720", "/SCORE2 NGCSMA;20;50,AC3D,NF3D {k}"],
     "STATS_REV": ["/STATS {k}", "/SCORE2 HMR,ACREV,NBS1 {k}"],
     "BPJS": ["malam: /SCORE2 NBS1,NF1D {k}", "pagi 09.15: /MFQ {k} 1", "pagi: /BOR {k}"],
+    "BSJP": ["/BOR {k}", "/MFQ {k} 1", "/SCORE2 BPR;2,NBS1;1 {k}"],
+    "BPJS_LIVE": ["/BOR {k}", "/MFQ {k} 1", "/SCORE2 OL,BPR;3,TF {k}"],
     "EXIT_WARNING": ["/C {k} F5", "/SCORE2 FR5,NBS2 {k}"],
 }
 
@@ -94,6 +98,137 @@ def _plan(entry, sl, tp):
     return {"entry": float(entry), "sl": sl, "tp1": tp, "rr": round(rr, 2), "lot": max(lot, 0)}
 
 
+def plan_bpjs(close: float) -> dict:
+    """Rencana beli pagi jual sore (kaidah HQSaham), angka dari close hari ini."""
+    return {
+        "entry": close,
+        "beli_bawah": round_tick(close, "down"),
+        "beli_atas": round_tick(close * 1.02, "down"),
+        "open_maks": round_tick(close * 1.03, "down"),      # gap terlalu tinggi = jangan kejar
+        "tp1": round_tick(close * 1.025, "up"),
+        "tp2": round_tick(close * 1.04, "up"),
+        "sl": round_tick(close * 0.98, "down"),             # batas keras kalau low 15 menit tak jelas
+        "rr": None, "lot": None,
+    }
+
+
+def plan_bsjp(price: float, low_today: float) -> dict:
+    """Rencana beli sore jual pagi, angka dari harga saat scan (±15 menit telat)."""
+    t = tick_size(price)
+    return {
+        "entry": price,
+        "beli_bawah": round_tick(price - t, "down"),
+        "beli_atas": round_tick(price + 2 * t, "down"),
+        "jangan_di_atas": round_tick(price * 1.02, "up"),    # sudah lari, jangan kejar
+        "tp1": round_tick(price * 1.02, "up"),
+        "tp2": round_tick(price * 1.03, "up"),
+        "sl": round_tick(max(low_today - t, price * 0.97), "down"),
+        "rr": None, "lot": None,
+    }
+
+
+def session_fraction(now) -> float:
+    """Porsi jam perdagangan yang sudah lewat (untuk membandingkan volume parsial hari ini
+    dengan rata-rata volume harian). Sesi Senin–Kamis 09.00–12.00 & 13.30–15.50,
+    Jumat 09.00–11.30 & 14.00–15.50. `now` sudah dikurangi keterlambatan data."""
+    m = now.hour * 60 + now.minute
+    if now.weekday() == 4:
+        s1, s2 = (540, 690), (840, 950)
+    else:
+        s1, s2 = (540, 720), (810, 950)
+    total = (s1[1] - s1[0]) + (s2[1] - s2[0])
+    done = max(0, min(m, s1[1]) - s1[0]) + max(0, min(m, s2[1]) - s2[0])
+    return max(done / total, 0.05)
+
+
+def _live_base(df, frac):
+    """Angka dasar untuk candle hari ini yang belum selesai."""
+    df = enrich(df)
+    last, prev = df.iloc[-1], df.iloc[-2]
+    c, o, h, l, v = (float(last["Close"]), float(last["Open"]), float(last["High"]),
+                     float(last["Low"]), float(last["Volume"]))
+    vol_avg = float(df["Volume"].iloc[-21:-1].mean())        # rata-rata 20 hari SEBELUM hari ini
+    val_avg = float((df["Close"] * df["Volume"]).iloc[-21:-1].mean()) / 1e9
+    return {
+        "df": df, "c": c, "o": o, "h": h, "l": l, "prev": float(prev["Close"]),
+        "ma20": float(df["Close"].iloc[-21:-1].mean()),
+        "chg": (c / float(prev["Close"]) - 1) * 100,
+        "value_m": c * v / 1e9, "val_avg": val_avg,
+        "vol_adj": v / (vol_avg * frac) if vol_avg else 0,   # >1 = lebih ramai dari biasanya
+        "rsi": float(df["RSI"].iloc[-1]),
+    }
+
+
+def _pack(kode, b, tipe, mode, skor, alasan, plan):
+    return {
+        "kode": kode, "tanggal": str(b["df"].index[-1].date()), "close": b["c"],
+        "chg_pct": round(b["chg"], 2), "vol_ratio": round(b["vol_adj"], 2),
+        "value_miliar": round(b["value_m"], 2), "rsi": round(b["rsi"], 1),
+        "signal": {"tipe": tipe, "skor": skor, "mode": mode, "alasan": alasan, **plan},
+    }
+
+
+def bsjp(kode: str, df, frac: float = 1.0) -> dict | None:
+    """BSJP live (15.00–15.50 WIB), candle hari ini belum selesai.
+    Resep skill: /SCORE100 IJO,CH,KOKO,PASMA;20,TVAL;5,BPR;2,PCH;2;15 (BPR dicek di bot).
+    Volume & nilai disesuaikan dengan porsi jam bursa yang sudah lewat."""
+    if len(df) < 30:
+        return None
+    b = _live_base(df, frac)
+    c = b["c"]
+    if c < config.MIN_PRICE or b["val_avg"] < config.MIN_VALUE_MILIAR:
+        return None
+    core = (c > b["o"] and c > b["ma20"] and 2 <= b["chg"] <= 15      # IJO, PASMA20, PCH 2–15
+            and b["vol_adj"] > 1 and b["value_m"] >= 5 * frac)          # KOKO & TVAL5 versi parsial
+    if not core:
+        return None
+    near_high = (b["h"] - c) / c <= 0.01                                # versi longgar CH
+    df2 = b["df"]
+    hc2d = c > df2["Close"].iloc[-2] > df2["Close"].iloc[-3]
+    bonus = [near_high, b["vol_adj"] >= 2, b["value_m"] >= 10 * frac, hc2d]
+    alasan = ("Dekat high hari ini" if near_high else "Naik tapi agak jauh dari high") + \
+             f", volume {b['vol_adj']:.1f}x normal".replace(".", ",")
+    return _pack(kode, b, "BSJP", "bsjp", _score(True, bonus), alasan, plan_bsjp(c, b["l"]))
+
+
+def plan_bpjs_live(price: float, open_: float) -> dict:
+    t = tick_size(price)
+    entry = price
+    return {
+        "entry": entry,
+        "beli_bawah": round_tick(price - t, "down"),
+        "beli_atas": round_tick(price + 2 * t, "down"),
+        "jangan_di_atas": round_tick(price * 1.02, "up"),
+        "tp1": round_tick(entry * 1.025, "up"),
+        "tp2": round_tick(entry * 1.04, "up"),
+        "sl": round_tick(open_ - t, "down"),              # open = low: jebol open = gagal
+        "rr": None, "lot": None,
+    }
+
+
+def bpjs_live(kode: str, df, frac: float, watch_semalam: set) -> dict | None:
+    """BPJS live (09.00–11.00 WIB). Resep pagi skill:
+    /SCORE100 OL,BPR;3,TF,VSPIKE1,TVAL;3,PASMA;20,PCH;1;5 (BPR & TF dicek di bot)."""
+    if len(df) < 30:
+        return None
+    b = _live_base(df, frac)
+    c, o, l = b["c"], b["o"], b["l"]
+    if c < config.MIN_PRICE or b["val_avg"] < config.MIN_VALUE_MILIAR:
+        return None
+    t = tick_size(c)
+    open_low = (o - l) <= t                                   # OL: open = low (belum pernah di bawah open)
+    core = (open_low and c > o and c > b["ma20"] and 1 <= b["chg"] <= 5
+            and b["vol_adj"] >= 1.5 and b["value_m"] >= max(0.5, 3 * frac))
+    if not core:
+        return None
+    near_high = (b["h"] - c) / c <= 0.01
+    semalam = kode in watch_semalam
+    bonus = [semalam, near_high, b["vol_adj"] >= 3, b["value_m"] >= 10 * frac]
+    alasan = "Open = low, naik di atas open" + (", ⭐ ada di daftar BPJS semalam" if semalam else "") + \
+             f", volume {b['vol_adj']:.1f}x normal".replace(".", ",")
+    return _pack(kode, b, "BPJS_LIVE", "bpjs_live", _score(True, bonus), alasan, plan_bpjs_live(c, o))
+
+
 def _score(core_ok: bool, bonus: list[bool]) -> int:
     if not core_ok:
         return 0
@@ -106,6 +241,8 @@ def analyze(kode: str, df) -> dict | None:
     df = enrich(df)
     last, prev = df.iloc[-1], df.iloc[-2]
     c, o, l = float(last["Close"]), float(last["Open"]), float(last["Low"])
+    if c < config.MIN_PRICE or float(last["ValueMA20"]) / 1e9 < config.MIN_VALUE_MILIAR:
+        return None                                         # gocap / tidak likuid: lewati
     t = tick_size(c)
     f = _filters(df)
     vp = volume_profile(df.tail(config.VP_LOOKBACK))
@@ -198,9 +335,8 @@ def analyze(kode: str, df) -> dict | None:
     keys = ["IJO", "KOKO", "PASMA20", "HC2D", "TVAL3", "PCH_2_8", "VSPIKE1", "HHHL"]
     skor = round(100 * sum(f[k] for k in keys) / len(keys))
     if skor >= 75 and f["IJO"] and f["PASMA20"] and f["TVAL3"]:
-        add("BPJS", skor, {"entry": None, "sl": None, "tp1": round_tick(c * 1.025, "up"),
-                            "rr": None, "lot": None}, mode="next_day",
-            alasan="Beli 09.15–09.30 jika open kuat; cut di bawah low 15 menit pertama; jual sebagian +2,5%; sisa ≤15.45")
+        add("BPJS", skor, plan_bpjs(c), mode="next_day",
+            alasan=f"{sum(f[k] for k in keys)}/8 filter BPJS lolos")
 
     # 9) Peringatan exit: FR5 (fractal hijau jebol) atau breakdown VAL
     alasan = []

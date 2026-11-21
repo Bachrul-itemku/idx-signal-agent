@@ -1,5 +1,14 @@
 # Agent Sinyal Saham IDX → Telegram
 
+## Ringkas
+- **Memindai semua saham IDX** (±950 kode di `tickers.txt`, otomatis diperbarui dari situs BEI kalau bisa diakses). Saham gocap dan saham yang nilai transaksinya < 1 miliar dilewati.
+- **09.00–11.00 WIB, tiap ±10 menit: BPJS live.** Syarat: open = low, harga di atas open & MA20, naik 1–5%, volume ≥1,5x normal (disesuaikan jam). Kandidat baru langsung dikirim dengan harga masuk, target +2,5%/+4%, dan cut di bawah open.
+- **15.00–15.50 WIB, tiap ±10 menit: BSJP live.** Syarat: hijau, di atas MA20, naik 2–15%, volume di atas normal, nilai transaksi besar. Dikirim dengan harga masuk (s.d. 15.49), target besok pagi +2%/+3%, dan cut.
+- Saham yang sudah dikirim tidak dikirim ulang di hari yang sama. Kalau tidak ada yang baru, bot diam.
+- **18.47 WIB**: daftar **BPJS besok** (jadi ⭐ prioritas di BPJS live pagi) + sinyal swing + peringatan exit untuk saham di `WATCHLIST`.
+- **Jumat 20.13 WIB**: rapor winrate.
+- `UNIVERSE=WATCHLIST` (variabel GitHub) kalau mau kembali hanya memindai watchlist.
+
 Memindai watchlist tiap sore, menghitung Volume Profile (POC/VAH/VAL), lalu mengirim sinyal ke Telegram.
 AI (Claude) hanya meninjau dan memberi komentar. Angka entry/SL/TP selalu dihitung kode.
 
