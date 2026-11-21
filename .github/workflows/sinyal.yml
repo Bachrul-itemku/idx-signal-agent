@@ -17,6 +17,10 @@ concurrency:
   group: sinyal
   cancel-in-progress: false
 
+defaults:
+  run:
+    working-directory: idx-signal-agent
+    
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -28,6 +32,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: idx-signal-agent/requirements.txt
 
       - run: pip install -r requirements.txt
 
