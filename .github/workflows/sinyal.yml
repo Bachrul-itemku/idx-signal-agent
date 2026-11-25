@@ -6,14 +6,17 @@ on:
     # memilih tugas sesuai jam WIB saat benar-benar jalan.
     - cron: "3-53/10 2-3 * * 1-5"   # 09.03–10.53 WIB tiap 10 menit: BPJS live
     - cron: "3 4 * * 1-5"           # 11.03 WIB: BPJS live terakhir
+    - cron: "20 4 * * 1-5"          # 11.20 WIB: ringkasan BPJS live
+    - cron: "48 7 * * 1-5"          # 14.48 WIB: BSJP live
     - cron: "58 7 * * 1-5"          # 14.58 WIB: BSJP live
     - cron: "8-48/10 8 * * 1-5"     # 15.08–15.48 WIB tiap 10 menit: BSJP live
+    - cron: "4 9 * * 1-5"           # 16.04 WIB: ringkasan BSJP (selalu dikirim)
     - cron: "47 11 * * 1-5"         # 18.47 WIB: swing + daftar BPJS besok
     - cron: "13 1 * * 6"            # Sabtu 08.13 WIB: evaluasi mingguan + ganti resep otomatis
   workflow_dispatch:
     inputs:
       perintah:
-        description: "scan, bpjs, bsjp, evaluasi, stats, auto, bsjp-uji, bpjs-uji"
+        description: "scan, bpjs, bsjp, evaluasi, stats, auto, ringkasan-bsjp, ringkasan-bpjs, bsjp-uji, bpjs-uji"
         default: scan
 
 permissions:

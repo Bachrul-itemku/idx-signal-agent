@@ -33,9 +33,19 @@ CREATE TABLE IF NOT EXISTS signals (
 )"""
 
 
+RUNS = """
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tanggal TEXT, kind TEXT, jam TEXT,
+    n_saham INTEGER, n_hari_ini INTEGER, n_kandidat INTEGER, n_baru INTEGER,
+    gagal TEXT                    -- JSON: syarat yang paling sering tidak lolos
+)"""
+
+
 def conn():
     c = sqlite3.connect(config.DB_PATH)
     c.execute(SCHEMA)
+    c.execute(RUNS)
     cols = {r[1] for r in c.execute("PRAGMA table_info(signals)")}
     for col, typ in [("skor", "INTEGER"), ("mode", "TEXT"), ("resep", "TEXT")]:   # migrasi DB lama
         if col not in cols:
@@ -228,3 +238,27 @@ def bpjs_semalam(before: str) -> set[str]:
         if not row or not row[0]:
             return set()
         return {r[0] for r in c.execute("SELECT kode FROM signals WHERE tipe='BPJS' AND tanggal=?", (row[0],))}
+
+
+def log_run(tanggal, kind, jam, n_saham, n_hari_ini, n_kandidat, n_baru, gagal: dict) -> None:
+    import json
+    with conn() as c:
+        c.execute("INSERT INTO runs (tanggal,kind,jam,n_saham,n_hari_ini,n_kandidat,n_baru,gagal) "
+                  "VALUES (?,?,?,?,?,?,?,?)",
+                  (tanggal, kind, jam, n_saham, n_hari_ini, n_kandidat, n_baru, json.dumps(gagal)))
+
+
+def runs_hari_ini(tanggal, kind) -> list[dict]:
+    import json
+    with conn() as c:
+        c.row_factory = sqlite3.Row
+        rows = [dict(r) for r in c.execute("SELECT * FROM runs WHERE tanggal=? AND kind=? ORDER BY id",
+                                           (tanggal, kind))]
+    for r in rows:
+        r["gagal"] = json.loads(r["gagal"] or "{}")
+    return rows
+
+
+def sinyal_hari_ini(tanggal, tipe) -> list[str]:
+    with conn() as c:
+        return [r[0] for r in c.execute("SELECT kode FROM signals WHERE tanggal=? AND tipe=?", (tanggal, tipe))]

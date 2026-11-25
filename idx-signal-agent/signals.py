@@ -194,6 +194,29 @@ def bsjp_dari_bar(kode, b, resep: str) -> dict | None:
     }
 
 
+def bsjp_diagnosa(df, frac: float) -> list[str]:
+    """Syarat dasar BSJP mana yang tidak lolos (untuk ringkasan harian)."""
+    if len(df) < 30:
+        return ["tidak_likuid"]
+    b = bar_view(enrich(df), -1, frac)
+    if b["c"] < config.MIN_PRICE or b["val_avg"] < config.MIN_VALUE_MILIAR:
+        return ["tidak_likuid"]
+    out = []
+    if b["c"] <= b["o"]:
+        out.append("tidak_hijau")
+    if b["c"] <= b["ma20"]:
+        out.append("di_bawah_ma20")
+    if b["chg"] < 2:
+        out.append("naik_kurang_2")
+    if b["chg"] > 15:
+        out.append("naik_lebih_15")
+    if b["vol_adj"] <= 1:
+        out.append("volume_kurang")
+    if b["value_m"] < 5 * frac:
+        out.append("nilai_kurang")
+    return out
+
+
 def bsjp(kode: str, df, frac: float = 1.0, resep: str | None = None) -> dict | None:
     """BSJP live (15.00–15.50 WIB) dengan resep aktif dari strategi.json."""
     if len(df) < 30:

@@ -217,21 +217,28 @@ def run_live(kind: str, uji: bool = False):
         frac = 1.0 if kind == "bsjp" else signals.session_fraction(wib.replace(hour=10, minute=0))
     if not any(str(df.index[-1].date()) == today for df in cache.values()):
         print("Belum ada data hari ini (libur bursa / data belum masuk), tidak kirim.")
+        if not uji:
+            journal.log_run(today, kind, f"{wib:%H.%M}", len(cache), 0, 0, 0, {})
         return
 
     semalam = journal.bpjs_semalam(today) if kind == "bpjs" else set()
     resep_bsjp = strategi.load()["BSJP"]
-    hasil = []
+    hasil, gagal, n_hari_ini = [], {}, 0
     for kode, df in cache.items():
         if str(df.index[-1].date()) != today:
             continue
+        n_hari_ini += 1
         try:
             r = signals.bpjs_live(kode, df, frac, semalam) if kind == "bpjs" else signals.bsjp(kode, df, frac, resep_bsjp)
+            if not r and kind == "bsjp":
+                for alasan in signals.bsjp_diagnosa(df, frac):
+                    gagal[alasan] = gagal.get(alasan, 0) + 1
         except Exception as e:
             print(f"[{kind}] {kode} dilewati: {e}")
             continue
         if r:
             hasil.append(r)
+    print(f"[{kind}] {n_hari_ini}/{len(cache)} saham punya candle hari ini; gagal syarat: {gagal}")
 
     hasil.sort(key=lambda x: (-x["signal"]["skor"], -x["value_miliar"]))
     baru = []
@@ -241,6 +248,8 @@ def run_live(kind: str, uji: bool = False):
         if uji or journal.save(r, None):
             baru.append(r)
     print(f"[{kind}] {len(hasil)} kandidat, {len(baru)} baru")
+    if not uji:
+        journal.log_run(today, kind, f"{wib:%H.%M}", len(cache), n_hari_ini, len(hasil), len(baru), gagal)
     if not baru:
         return                                          # tidak ada yang baru: diam saja
 
@@ -257,6 +266,50 @@ def run_live(kind: str, uji: bool = False):
     telegram_send.send("\n\n".join(parts))
 
 
+LABEL_GAGAL = {
+    "tidak_hijau": "candle tidak hijau (close ≤ open)",
+    "di_bawah_ma20": "di bawah MA20",
+    "naik_kurang_2": "naik < 2%",
+    "naik_lebih_15": "naik > 15%",
+    "volume_kurang": "volume belum di atas normal",
+    "nilai_kurang": "nilai transaksi belum ≥ 5 M",
+    "tidak_likuid": "tidak likuid / harga gocap",
+}
+
+
+def ringkasan(kind: str):
+    """Laporan harian yang SELALU dikirim: berapa kali dicek, hasilnya, dan penyebab kalau kosong."""
+    wib = now_wib()
+    today = wib.date().isoformat()
+    runs = journal.runs_hari_ini(today, kind)
+    if not runs and kind == "bsjp" and wib.hour * 60 + wib.minute <= 16 * 60 + 12:
+        run_live("bsjp")                              # belum pernah dicek: cek sekarang (post-trading)
+        runs = journal.runs_hari_ini(today, kind)
+    tipe = "BSJP" if kind == "bsjp" else "BPJS_LIVE"
+    terkirim = journal.sinyal_hari_ini(today, tipe)
+    judul = "🌙 <b>Ringkasan BSJP</b>" if kind == "bsjp" else "⚡ <b>Ringkasan BPJS live</b>"
+    p = [f"{judul} · {today}"]
+    if not runs:
+        p.append("❗ Hari ini <b>tidak ada pengecekan yang berjalan</b> di jendela waktunya. "
+                 "Penyebab: jadwal GitHub terlambat/terlewat. Bukan berarti tidak ada sinyal.")
+    else:
+        jam = ", ".join(r["jam"] for r in runs)
+        p.append(f"Dicek {len(runs)} kali (jam {jam}).")
+        if terkirim:
+            p.append(f"✅ {len(terkirim)} saham sudah dikirim: " + ", ".join(terkirim))
+        elif max(r["n_hari_ini"] for r in runs) == 0:
+            p.append("❗ Data candle hari ini tidak tersedia dari Yahoo saat dicek, jadi tidak bisa dinilai.")
+        else:
+            last = runs[-1]
+            p.append(f"Tidak ada saham yang lolos syarat dari {last['n_hari_ini']} saham.")
+            if last["gagal"]:
+                top = sorted(last["gagal"].items(), key=lambda x: -x[1])[:4]
+                p.append("Syarat yang paling sering gagal (pengecekan terakhir):\n" + "\n".join(
+                    f"• {LABEL_GAGAL.get(k, k)}: {v} saham" for k, v in top))
+            p.append("Artinya pasar sore ini tidak memberi setup BSJP yang sesuai resep. Ini normal di hari lesu.")
+    telegram_send.send("\n\n".join(p))
+
+
 def run_auto():
     """Dipanggil jadwal GitHub; pilih tugas sesuai jam WIB (jadwal GitHub bisa molor)."""
     wib = now_wib()
@@ -265,8 +318,12 @@ def run_auto():
         print("Akhir pekan, tidak ada tugas.")
     elif 9 * 60 <= m <= 11 * 60 + 10:
         run_live("bpjs")
-    elif 14 * 60 + 55 <= m <= 15 * 60 + 50:
+    elif 11 * 60 + 10 < m <= 12 * 60:
+        ringkasan("bpjs")
+    elif 14 * 60 + 45 <= m <= 15 * 60 + 58:
         run_live("bsjp")
+    elif 15 * 60 + 58 < m <= 17 * 60 + 15:
+        ringkasan("bsjp")
     elif m >= 17 * 60 + 30:
         run_scan()
     else:
@@ -279,6 +336,8 @@ if __name__ == "__main__":
         telegram_send.send(journal.stats_text())
     elif cmd in ("bsjp", "bpjs"):
         run_live(cmd)
+    elif cmd in ("ringkasan-bsjp", "ringkasan-bpjs"):
+        ringkasan(cmd.split("-")[1])
     elif cmd in ("bsjp-uji", "bpjs-uji"):
         run_live(cmd.split("-")[0], uji=True)
     elif cmd == "evaluasi":
