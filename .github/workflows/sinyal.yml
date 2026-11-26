@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       perintah:
-        description: "scan, bpjs, bsjp, evaluasi, stats, auto, ringkasan-bsjp, ringkasan-bpjs, bsjp-uji, bpjs-uji"
+        description: "scan, bpjs, bsjp, evaluasi, stats, riset, auto, ringkasan-bsjp, ringkasan-bpjs, bsjp-uji, bpjs-uji"
         default: scan
 
 permissions:

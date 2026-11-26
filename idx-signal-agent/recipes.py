@@ -97,8 +97,9 @@ BPJS = {
 # ---------- Swing ----------
 SWING_SEMUA = ["BASE_RECOVERY", "VP_VAL_BOUNCE", "VP_VAH_BREAKOUT", "FR4_BREAKOUT", "FR2_PULLBACK", "FCAAK",
                "MA_GC", "STATS_REV", "BB_BOUNCE", "GZ_FIBO", "HBO_VOL"]
-SWING_AWAL = ["VP_VAL_BOUNCE", "VP_VAH_BREAKOUT", "FR4_BREAKOUT", "FR2_PULLBACK", "FCAAK",
-              "MA_GC", "STATS_REV"]
+# Riset 2 tahun (biaya fee + 1 tick, hanya saat IHSG > MA50): 4 tipe ini positif di periode cari & uji.
+# VP_VAL_BOUNCE, FR2_PULLBACK, BB_BOUNCE, STATS_REV, FCAAK konsisten rugi → tidak aktif (tetap diuji mingguan).
+SWING_AWAL = ["MA_GC", "FR4_BREAKOUT", "HBO_VOL", "GZ_FIBO"]
 
 # BASE_RECOVERY sengaja tidak aktif: riset menunjukkan hanya bagus di saham dekat gocap & pasar naik,
 # negatif setelah biaya 1 tick. Tetap ikut diuji evaluasi mingguan.

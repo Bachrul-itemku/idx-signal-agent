@@ -449,6 +449,9 @@ def analyze(kode: str, df, aktif: dict | None = None, pasar: dict | None = None)
     if alasan:
         add("EXIT_WARNING", 100, mode="warning", alasan="; ".join(alasan))
 
+    # Riset 2 tahun: swing rugi di pasar turun (IHSG −35% Des 2025–Jun 2026). Swing hanya saat IHSG > MA50.
+    if pasar is not None and pasar.get("ihsg_up50") is False:
+        out = [x for x in out if x["mode"] != "swing"]
     if aktif is not None:                                   # hanya tipe swing yang aktif
         out = [x for x in out if x["mode"] != "swing" or x["tipe"] in aktif["SWING"]]
     info["signals"] = sorted(out, key=lambda s: -s["skor"])

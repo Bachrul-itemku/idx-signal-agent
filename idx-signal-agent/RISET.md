@@ -23,9 +23,22 @@ tidak pernah dipakai untuk memilih.
 
 Keduanya bertransaksi di harga lelang (pembukaan/penutupan), jadi tidak kena selisih bid-offer.
 
-## Dicoba tapi tidak dipakai
-- `BASE_RECOVERY` (di atas MA20, ≤ 10% dari low 52 minggu, harga < 200): menang 85% di 2026, tetapi
-  mayoritas saham dekat gocap; setelah biaya 1 tick negatif di 2024–25. Rapuh, tidak aktif.
+## Swing
+- Pencarian kombinasi baru (dengan biaya 1 tick): kandidat terbaik `ma200+ & dekat_lo52` menang 95% di
+  periode uji, tetapi hanya 18 saham (didominasi MPMX & saham gocap); tanpa saham < 100 periode cari rugi.
+  Tidak dipakai. `BASE_RECOVERY` sama: rapuh, tidak aktif.
+- IHSG turun ±35% (8.647 → 5.643, Des 2025 – Jun 2026); hampir semua swing rugi di periode itu.
+- 10 tipe swing bot diuji 2 tahun (fee + 1 tick). Dengan filter **IHSG > MA50**:
+
+| Tipe | Menang cari / uji | Rata-rata cari / uji |
+|---|---|---|
+| MA_GC | 45% / 52% | +3,2% / +3,3% |
+| GZ_FIBO | 50% / 62% | +3,2% / +4,4% |
+| FR4_BREAKOUT | 45% / 53% | +2,9% / +1,9% |
+| HBO_VOL | 49% / 50% | +6,9% / +1,6% |
+
+  VP_VAL_BOUNCE, FR2_PULLBACK, BB_BOUNCE, STATS_REV, FCAAK rugi di semua periode → tidak aktif.
+- Aturan bot: swing hanya dikirim saat IHSG > MA50 (`signals.analyze`).
 - Target kecil + cut lebar (mis. TP 1% / SL 5%) menaikkan winrate tapi rata-rata hasil turun.
 
 ## Batasan

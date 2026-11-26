@@ -216,7 +216,10 @@ def run_scan():
     parts.append(f"<b>━━ ☀️ Daftar BPJS besok ({len(bpjs_cards)}) ━━</b>")
     parts += bpjs_cards or ["Tidak ada kandidat BPJS."]
     parts.append(f"<b>━━ Sinyal swing ({len(swing_cards)}) ━━</b>")
-    parts += swing_cards or ["Tidak ada sinyal swing."]
+    if pasar.get("ihsg_up50") is False:
+        parts.append("⏸ Swing ditahan: IHSG di bawah MA50. Riset 2 tahun: swing rugi saat pasar turun.")
+    else:
+        parts += swing_cards or ["Tidak ada sinyal swing."]
     if warnings:
         parts.append("<b>━━ 🔴 Peringatan exit (saham di WATCHLIST) ━━</b>")
         parts.append("\n".join(f"🔴 <b>{w['kode']}</b> {fmt(w['close'])}: {html.escape(w['signal']['alasan'])}"
@@ -367,6 +370,10 @@ if __name__ == "__main__":
         ringkasan(cmd.split("-")[1])
     elif cmd in ("bsjp-uji", "bpjs-uji"):
         run_live(cmd.split("-")[0], uji=True)
+    elif cmd == "riset":                    # kirim laporan riset (laporan_riset.txt) ke Telegram
+        import os
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "laporan_riset.txt")) as fh:
+            telegram_send.send(fh.read().strip())
     elif cmd == "evaluasi":
         import evaluasi
         evaluasi.run()

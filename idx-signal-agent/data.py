@@ -82,10 +82,21 @@ def pasar_series(cache: dict, period: str = "3y") -> dict:
     ada = set()
     ihsg = fetch_symbol("^JKSE", period)
     if ihsg is not None:
-        r = (ihsg["Close"] / ihsg["Close"].shift(1) - 1) * 100
+        ic = ihsg["Close"]
+        r = (ic / ic.shift(1) - 1) * 100
+        up50 = ic > ic.rolling(50).mean()
         for d, v in r.dropna().items():
-            out.setdefault(str(d.date()), {"breadth": 0.0})["ihsg_ret1"] = float(v)
+            o = out.setdefault(str(d.date()), {"breadth": 0.0})
+            o["ihsg_ret1"] = float(v)
+            o["ihsg_up50"] = bool(up50.loc[d])
             ada.add(str(d.date()))
+        # Hari yang belum punya IHSG: pakai status MA50 hari bursa sebelumnya
+        last_up = None
+        for key in sorted(out):
+            if "ihsg_up50" in out[key]:
+                last_up = out[key]["ihsg_up50"]
+            elif last_up is not None:
+                out[key]["ihsg_up50"] = last_up
     # Cadangan kalau IHSG hari itu belum ada di Yahoo: rata-rata return 50 saham terlikuid
     value = pd.DataFrame({k: df["Close"] * df["Volume"] for k, df in cache.items()})
     top = value.tail(20).mean().nlargest(50).index
