@@ -35,7 +35,15 @@ def _bsjp_hc2d(b):
     return core, [b["near_high"], b["vol_adj"] >= 1.5, b["value_m"] >= 10 * b["frac"], b["chg"] >= 2]
 
 
+def _bsjp_mombb(b):
+    # Riset 3 tahun: tembus upper BB + naik >4% + rata nilai 20 hari ≥50 M + harga 200–1000,
+    # JUAL DI OPEN BESOK. WR 68% / 67% / 72% (train / valid / test), rata-rata +0,6%/trade bersih.
+    core = (b["c"] > b["bb_up"] and b["chg"] > 4 and b["val_avg"] >= 50 and 200 <= b["c"] <= 1000)
+    return core, [b["vol_adj"] >= 2, b["hc2d"], b["near_high"], b["chg"] <= 10]
+
+
 BSJP = {
+    "BSJP_MOMBB": ("Riset: tembus upper BB, naik >4%, rata nilai ≥50 M, harga 200–1000; jual di open", _bsjp_mombb),
     "BSJP_LONGGAR": ("IJO,KOKO,PASMA20,TVAL5,PCH 2–15%", _bsjp_longgar),
     "BSJP_KETAT": ("+ close = high (CH)", _bsjp_ketat),
     "BSJP_KOMUNITAS": ("TVAL5 + VSPIKE1", _bsjp_komunitas),
@@ -70,7 +78,16 @@ def _bpjs_green_hammer(f):
     return (75 + 25 * f["VSPIKE1"]) if ok else 0
 
 
+def _bpjs_dip(f):
+    # Riset 3 tahun: buy the dip saat pasar panik. Turun >4%, close di bawah lower BB, IHSG turun >1%,
+    # rata nilai ≥10 M. Beli di open besok, jual di close besok.
+    # WR 57% / 57% / 59%, rata-rata +0,6% / +2,1% / +2,1% per trade bersih.
+    ok = f["TURUN4"] and f["BB_BAWAH"] and f["IHSG_TURUN1"] and f["RATA10"]
+    return 100 if ok else 0
+
+
 BPJS = {
+    "BPJS_DIP": ("Riset: turun >4%, di bawah lower BB, IHSG turun >1%; beli open, jual close", _bpjs_dip),
     "BPJS_SKOR8": ("≥6 dari 8 filter (IJO,KOKO,PASMA20,HC2D,TVAL3,PCH,VSPIKE1,HHHL)", _bpjs_skor8),
     "BPJS_KOKO": ("IJO,KOKO,PASMA20,PCH 2–8%", _bpjs_koko),
     "BPJS_HC2D": ("HC2D,PASMA5,PASMA20,TVAL3", _bpjs_hc2d),
@@ -78,9 +95,11 @@ BPJS = {
 }
 
 # ---------- Swing ----------
-SWING_SEMUA = ["VP_VAL_BOUNCE", "VP_VAH_BREAKOUT", "FR4_BREAKOUT", "FR2_PULLBACK", "FCAAK",
+SWING_SEMUA = ["BASE_RECOVERY", "VP_VAL_BOUNCE", "VP_VAH_BREAKOUT", "FR4_BREAKOUT", "FR2_PULLBACK", "FCAAK",
                "MA_GC", "STATS_REV", "BB_BOUNCE", "GZ_FIBO", "HBO_VOL"]
 SWING_AWAL = ["VP_VAL_BOUNCE", "VP_VAH_BREAKOUT", "FR4_BREAKOUT", "FR2_PULLBACK", "FCAAK",
               "MA_GC", "STATS_REV"]
 
-DEFAULT = {"BSJP": "BSJP_LONGGAR", "BPJS": "BPJS_SKOR8", "SWING": SWING_AWAL, "riwayat": []}
+# BASE_RECOVERY sengaja tidak aktif: riset menunjukkan hanya bagus di saham dekat gocap & pasar naik,
+# negatif setelah biaya 1 tick. Tetap ikut diuji evaluasi mingguan.
+DEFAULT = {"BSJP": "BSJP_MOMBB", "BPJS": "BPJS_DIP", "SWING": list(SWING_AWAL), "riwayat": []}

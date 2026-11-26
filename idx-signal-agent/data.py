@@ -58,3 +58,40 @@ def fetch_many(kodes: list[str], period: str | None = None, batch: int = 100) ->
         time.sleep(1)                                      # jangan membanjiri Yahoo
     print(f"[data] {len(out)}/{len(kodes)} saham berhasil diunduh")
     return out
+
+
+def fetch_symbol(sym: str, period: str = "1y") -> pd.DataFrame | None:
+    """Simbol Yahoo apa adanya, mis. ^JKSE (IHSG)."""
+    try:
+        df = yf.download(sym, period=period, interval="1d", auto_adjust=False, progress=False)
+        if df is None or df.empty:
+            return None
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        return df[["Open", "High", "Low", "Close"]].dropna()        # volume indeks bisa 0
+    except Exception as e:
+        print(f"[data] gagal {sym}: {e}")
+        return None
+
+
+def pasar_series(cache: dict, period: str = "3y") -> dict:
+    """{tanggal: {"ihsg_ret1": %, "breadth": porsi saham di atas MA20}} untuk semua tanggal."""
+    closes = pd.DataFrame({k: df["Close"] for k, df in cache.items()})
+    breadth = (closes > closes.rolling(20, min_periods=20).mean()).sum(axis=1) / closes.notna().sum(axis=1)
+    out = {str(d.date()): {"breadth": float(b), "ihsg_ret1": 0.0} for d, b in breadth.items()}
+    ada = set()
+    ihsg = fetch_symbol("^JKSE", period)
+    if ihsg is not None:
+        r = (ihsg["Close"] / ihsg["Close"].shift(1) - 1) * 100
+        for d, v in r.dropna().items():
+            out.setdefault(str(d.date()), {"breadth": 0.0})["ihsg_ret1"] = float(v)
+            ada.add(str(d.date()))
+    # Cadangan kalau IHSG hari itu belum ada di Yahoo: rata-rata return 50 saham terlikuid
+    value = pd.DataFrame({k: df["Close"] * df["Volume"] for k, df in cache.items()})
+    top = value.tail(20).mean().nlargest(50).index
+    proxy = (closes[top] / closes[top].shift(1) - 1).mean(axis=1) * 100
+    for d, v in proxy.dropna().items():
+        key = str(d.date())
+        if key not in ada and key in out:
+            out[key]["ihsg_ret1"] = float(v)
+    return out

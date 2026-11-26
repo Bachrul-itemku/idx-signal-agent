@@ -90,6 +90,13 @@ def _evaluate(row: dict, df: pd.DataFrame) -> dict | None:
 
     mode = row.get("mode") or ("warning" if row["tipe"] in ("VAL_BREAKDOWN", "EXIT_WARNING") else "swing")
 
+    if mode == "next_day" and row.get("resep") == "BPJS_DIP":   # beli open, jual close besok
+        bar = after.iloc[0]
+        o = float(bar["Open"])
+        px = float(bar["Close"])
+        return {"status": "WIN" if px > o else "LOSS", "exit_date": str(after.index[0].date()),
+                "exit_price": px, "result_pct": round((px / o - 1) * 100, 2), "hold_days": 1}
+
     if mode == "next_day":                     # BPJS: beli besok pagi
         bar = after.iloc[0]
         o, close0 = float(bar["Open"]), row["close"]
@@ -111,6 +118,9 @@ def _evaluate(row: dict, df: pd.DataFrame) -> dict | None:
         entry = float(day["Close"].iloc[0]) if len(day) else row["close"]
         bar = after.iloc[0]
         o = float(bar["Open"])
+        if row.get("resep") == "BSJP_MOMBB":   # hasil riset: jual di open, apa pun hasilnya
+            return {"status": "WIN" if o > entry else "LOSS", "exit_date": str(after.index[0].date()),
+                    "exit_price": o, "result_pct": round((o / entry - 1) * 100, 2), "hold_days": 1}
         tp, sl = entry * 1.02, row["sl"] or entry * 0.97
         if o >= tp:
             px, status = o, "WIN"

@@ -107,4 +107,6 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
     df["MA20prev"] = c.shift(1).rolling(20).mean()
     df["VolAvgPrev"] = df["Volume"].shift(1).rolling(20).mean()
     df["ValAvgPrev"] = df["Value"].shift(1).rolling(20).mean()
+    df["Low250"] = df["Low"].rolling(250, min_periods=120).min()
+    df["Flat20"] = (df["High"] == df["Low"]).astype(float).rolling(20).mean()   # saham "tidur"/FCA
     return df

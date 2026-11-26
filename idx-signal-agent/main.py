@@ -60,6 +60,18 @@ def render_swing(c: dict, komentar: str = "") -> str:
 
 def render_bpjs(c: dict, komentar: str = "") -> str:
     s, k = c["signal"], c["kode"]
+    if s.get("resep") == "BPJS_DIP":
+        lines = [f"🩸 <b>{k}</b> · buy the dip · close {fmt(c['close'])} "
+                 f"({'+' if c['chg_pct'] >= 0 else ''}{dec(c['chg_pct'], 2)}%) · nilai {dec(c['value_miliar'])} M",
+                 html.escape(s["alasan"]),
+                 "🟢 <b>Masuk besok di pembukaan (09.00)</b>, harga open berapa pun",
+                 "🎯 <b>Keluar besok di penutupan</b> (pre-closing 15.50–16.00 / post-trading), untung atau rugi",
+                 "📊 Riset 3 tahun: menang ±57%, tapi rata-rata untungnya lebih besar dari ruginya "
+                 "(+0,6% s.d. +2% per trade bersih fee). Jangan cut di tengah hari."]
+        if komentar:
+            lines.append(f"<i>{html.escape(komentar)}</i>")
+        lines.append(cek_bot("BPJS", k))
+        return "\n".join(lines)
     lines = [f"☀️ <b>{k}</b> · skor {s['skor']} · close {fmt(c['close'])} ({'+' if c['chg_pct'] >= 0 else ''}{dec(c['chg_pct'], 2)}%) · nilai {dec(c['value_miliar'])} M · vol {dec(c['vol_ratio'])}x",
              f"🟢 <b>Masuk besok 09.15–09.30</b> di {fmt(s['beli_bawah'])}–{fmt(s['beli_atas'])}, "
              f"hanya jika open ≥ {fmt(s['beli_bawah'])} dan ≤ {fmt(s['open_maks'])} serta harga bertahan di atas open",
@@ -76,7 +88,14 @@ def render_live(c: dict) -> str:
     s, k = c["signal"], c["kode"]
     head = (f"<b>{k}</b> · skor {s['skor']} · harga {fmt(c['close'])} "
             f"({'+' if c['chg_pct'] >= 0 else ''}{dec(c['chg_pct'], 2)}%) · nilai {dec(c['value_miliar'])} M")
-    if s["tipe"] == "BSJP":
+    if s["tipe"] == "BSJP" and s.get("resep") == "BSJP_MOMBB":
+        rencana = [
+            f"🟢 <b>Masuk sekarang s.d. 15.49 / post-trading</b> di {fmt(s['beli_bawah'])}–{fmt(s['beli_atas'])}; "
+            f"jangan kejar di atas {fmt(s['jangan_di_atas'])}",
+            "🎯 <b>Keluar besok di pembukaan (09.00, harga open)</b>, untung atau rugi. "
+            "Riset 3 tahun: jual di open paling konsisten (menang ±68%, rata-rata +0,6% bersih).",
+        ]
+    elif s["tipe"] == "BSJP":
         rencana = [
             f"🟢 <b>Masuk sekarang s.d. 15.49</b> di {fmt(s['beli_bawah'])}–{fmt(s['beli_atas'])}; "
             f"jangan kejar di atas {fmt(s['jangan_di_atas'])}",
@@ -109,10 +128,14 @@ def run_scan():
         return cache[kode]
 
     aktif = strategi.load()
+    pasar_all = data.pasar_series(cache, period="6mo")
+    hari_akhir = max(str(df.index[-1].date()) for df in cache.values()) if cache else ""
+    pasar = pasar_all.get(hari_akhir, {})
+    print(f"[main] pasar {hari_akhir}: {pasar}")
     all_info, swing_c, bpjs_c, warnings = {}, [], [], []
     for kode, df in cache.items():
         try:
-            info = signals.analyze(kode, df, aktif)
+            info = signals.analyze(kode, df, aktif, pasar)
         except Exception as e:
             print(f"[signals] {kode} dilewati: {e}")
             continue
@@ -231,7 +254,7 @@ def run_live(kind: str, uji: bool = False):
         try:
             r = signals.bpjs_live(kode, df, frac, semalam) if kind == "bpjs" else signals.bsjp(kode, df, frac, resep_bsjp)
             if not r and kind == "bsjp":
-                for alasan in signals.bsjp_diagnosa(df, frac):
+                for alasan in signals.bsjp_diagnosa(df, frac, resep_bsjp):
                     gagal[alasan] = gagal.get(alasan, 0) + 1
         except Exception as e:
             print(f"[{kind}] {kode} dilewati: {e}")
@@ -274,6 +297,10 @@ LABEL_GAGAL = {
     "volume_kurang": "volume belum di atas normal",
     "nilai_kurang": "nilai transaksi belum ≥ 5 M",
     "tidak_likuid": "tidak likuid / harga gocap",
+    "di_bawah_bb_atas": "belum menembus upper Bollinger",
+    "naik_kurang_4": "naik ≤ 4%",
+    "rata_nilai_kurang_50": "rata nilai transaksi 20 hari < 50 M",
+    "harga_luar_200_1000": "harga di luar 200–1.000",
 }
 
 

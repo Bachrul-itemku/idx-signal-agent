@@ -31,7 +31,7 @@ COOLDOWN_HARI = 13                   # jangan ganti kategori yang sama dua mingg
 def _row(r):
     s = r["signal"]
     return {"tanggal": r["tanggal"], "close": r["close"], "entry": s.get("entry"), "sl": s.get("sl"),
-            "tp1": s.get("tp1"), "mode": s["mode"], "tipe": s["tipe"]}
+            "tp1": s.get("tp1"), "mode": s["mode"], "tipe": s["tipe"], "resep": s.get("resep")}
 
 
 def _metrics(trades, batas_4m: str) -> dict:
@@ -56,6 +56,7 @@ def backtest(cache: dict) -> tuple[dict, str, int]:
             liquid.append((val, kode))
     liquid = [k for _, k in sorted(liquid, reverse=True)[:config.BT_MAX_SAHAM]]
 
+    pasar = data.pasar_series(cache, period="3y")
     trades = defaultdict(list)
     tanggal_uji = set()
     for n, kode in enumerate(liquid):
@@ -76,17 +77,21 @@ def backtest(cache: dict) -> tuple[dict, str, int]:
                     if res:
                         trades[("BSJP", nama)].append((tgl, res["result_pct"] - config.FEE_PCT))
             # BPJS malam (eksekusi besok pagi)
-            f = signals._filters(dfe.iloc[:i + 1])
+            ps = pasar.get(tgl, {})
+            f = signals._filters(dfe.iloc[:i + 1], ps)
+            if f["TERKUNCI"]:
+                continue
             for nama, (_, fn) in recipes.BPJS.items():
                 if fn(f):
                     r = {"tanggal": tgl, "close": b["c"],
-                         "signal": {**signals.plan_bpjs(b["c"]), "mode": "next_day", "tipe": "BPJS"}}
+                         "signal": {**signals.plan_bpjs(b["c"]), "mode": "next_day", "tipe": "BPJS",
+                                    "resep": nama}}
                     res = journal._evaluate(_row(r), df)
                     if res and res["status"] != "SKIP":
                         trades[("BPJS", nama)].append((tgl, res["result_pct"] - config.FEE_PCT))
             # Swing (tiap 3 hari supaya cepat)
             if (i - start) % 3 == 0:
-                info = signals.analyze(kode, df.iloc[max(0, i - 259):i + 1], aktif=None)
+                info = signals.analyze(kode, df.iloc[max(0, i - 259):i + 1], aktif=None, pasar=ps)
                 for sig in (info or {}).get("signals", []):
                     if sig["mode"] != "swing":
                         continue
