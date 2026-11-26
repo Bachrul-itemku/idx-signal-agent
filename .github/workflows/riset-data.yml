@@ -1,0 +1,38 @@
+name: Riset - ambil data
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: idx-signal-agent/requirements.txt
+
+      - run: pip install -r idx-signal-agent/requirements.txt
+
+      - name: Unduh data
+        working-directory: idx-signal-agent
+        run: python dump_data.py
+
+      - name: Simpan ke branch data-riset
+        run: |
+          mkdir -p /tmp/out && cp idx-signal-agent/riset_data/* /tmp/out/
+          git config user.name "sinyal-bot"
+          git config user.email "sinyal-bot@users.noreply.github.com"
+          git checkout --orphan data-riset
+          git rm -rq --cached . && git clean -fdq -e .git
+          cp /tmp/out/* .
+          git add ohlcv.csv.gz ihsg.csv.gz
+          git commit -qm "Data riset $(date -u +%F)"
+          git push -f origin data-riset
