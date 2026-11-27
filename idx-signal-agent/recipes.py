@@ -42,16 +42,26 @@ def _bsjp_mombb(b):
     return core, [b["vol_adj"] >= 2, b["hc2d"], b["near_high"], b["chg"] <= 10]
 
 
+def _bsjp_mombb_plus(b):
+    # Riset ronde 2 (walk-forward 5 periode): MOMBB + naik hanya 4–10% + IHSG naik dalam 5 hari.
+    # Menang 76% (vs 68,5%), rata-rata +0,83% (vs +0,58%) bersih, positif di 5/5 periode.
+    core, bonus = _bsjp_mombb(b)
+    return core and b["chg"] < 10 and b.get("ihsg_ret5", 0) > 0, bonus
+
+
 def _bsjp_mombb_luas(b):
-    # Cadangan: tembus upper BB, naik >4%, rata nilai ≥20 M, harga 100–2.000; jual di open besok.
-    # Riset: ±1,7 sinyal/hari, menang 61% / 59% / 56%, rata-rata +0,5% / +0,7% / +0,5% bersih.
-    core = (b["c"] > b["bb_up"] and b["chg"] > 4 and b["val_avg"] >= 20 and 100 <= b["c"] <= 2000)
+    # Cadangan: tembus upper BB, naik 4–10%, rata nilai ≥20 M, harga 100–2.000, IHSG naik 5 hari.
+    # Riset ronde 2: menang 64% (vs 60%), rata-rata +0,61% bersih, positif di 5/5 periode.
+    core = (b["c"] > b["bb_up"] and 4 < b["chg"] < 10 and b["val_avg"] >= 20
+            and 100 <= b["c"] <= 2000 and b.get("ihsg_ret5", 0) > 0)
     return core, [b["vol_adj"] >= 2, b["hc2d"], b["near_high"], b["chg"] <= 10]
 
 
-BSJP_CADANGAN = {"BSJP_MOMBB": "BSJP_MOMBB_LUAS"}   # resep aktif → lapis cadangan
+# Resep aktif → urutan lapis (nama lapis, resep)
+BSJP_LAPIS = {"BSJP_MOMBB": [("plus", "BSJP_MOMBB_PLUS"), ("utama", "BSJP_MOMBB"), ("cadangan", "BSJP_MOMBB_LUAS")]}
 
 BSJP = {
+    "BSJP_MOMBB_PLUS": ("Riset 2: MOMBB + naik 4–10% + IHSG naik 5 hari; jual di open", _bsjp_mombb_plus),
     "BSJP_MOMBB_LUAS": ("Cadangan: tembus upper BB, naik >4%, rata nilai ≥20 M, harga 100–2.000; jual di open", _bsjp_mombb_luas),
     "BSJP_MOMBB": ("Riset: tembus upper BB, naik >4%, rata nilai ≥50 M, harga 200–1000; jual di open", _bsjp_mombb),
     "BSJP_LONGGAR": ("IJO,KOKO,PASMA20,TVAL5,PCH 2–15%", _bsjp_longgar),
@@ -96,7 +106,16 @@ def _bpjs_dip(f):
     return 100 if ok else 0
 
 
+def _bpjs_dip2(f):
+    # Riset ronde 2: BPJS_DIP + close dekat low hari itu (IBS < 0,2) = kapitulasi.
+    # Menang 61% (vs 57,5%), rata-rata +2,5% (vs +1,7%) bersih. Lebih kuat saat IHSG turun >2%.
+    if not (f["TURUN4"] and f["BB_BAWAH"] and f["IHSG_TURUN1"] and f["RATA10"] and f["IBS"] < 0.2):
+        return 0
+    return 100 if f["IHSG_TURUN2"] else 85
+
+
 BPJS = {
+    "BPJS_DIP2": ("Riset 2: DIP + close dekat low (IBS<0,2); beli open, jual close", _bpjs_dip2),
     "BPJS_DIP": ("Riset: turun >4%, di bawah lower BB, IHSG turun >1%; beli open, jual close", _bpjs_dip),
     "BPJS_SKOR8": ("≥6 dari 8 filter (IJO,KOKO,PASMA20,HC2D,TVAL3,PCH,VSPIKE1,HHHL)", _bpjs_skor8),
     "BPJS_KOKO": ("IJO,KOKO,PASMA20,PCH 2–8%", _bpjs_koko),
@@ -113,4 +132,4 @@ SWING_AWAL = ["MA_GC", "FR4_BREAKOUT", "HBO_VOL", "GZ_FIBO"]
 
 # BASE_RECOVERY sengaja tidak aktif: riset menunjukkan hanya bagus di saham dekat gocap & pasar naik,
 # negatif setelah biaya 1 tick. Tetap ikut diuji evaluasi mingguan.
-DEFAULT = {"BSJP": "BSJP_MOMBB", "BPJS": "BPJS_DIP", "SWING": list(SWING_AWAL), "riwayat": []}
+DEFAULT = {"BSJP": "BSJP_MOMBB", "BPJS": "BPJS_DIP2", "SWING": list(SWING_AWAL), "riwayat": []}

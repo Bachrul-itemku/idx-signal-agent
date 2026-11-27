@@ -45,3 +45,18 @@ Keduanya bertransaksi di harga lelang (pembukaan/penutupan), jadi tidak kena sel
 Data harian (urutan intraday tidak diketahui; kalau TP & SL tersentuh di hari yang sama dianggap SL),
 daftar saham hanya yang masih tercatat sekarang (survivorship bias), dan 2026 sebagian besar pasar naik.
 Ulang riset: workflow "Riset - ambil data" → branch `data-riset`.
+
+# Ronde 2 (27 Nov 2026)
+Walk-forward 5 periode berurutan; perbaikan diterima hanya jika winrate dan rata-rata lebih baik
+di ≥4 dari 5 periode. Fitur baru: ranking kekuatan relatif, kekuatan vs IHSG, IHSG 5/20 hari,
+posisi dalam rentang 20 hari, susunan MA, volume mengering, hari, ranking nilai transaksi.
+
+| Resep | Syarat tambahan | Menang | Rata-rata bersih |
+|---|---|---|---|
+| `BSJP_MOMBB_PLUS` (lapis ⭐⭐) | MOMBB + naik < 10% + IHSG naik 5 hari | 76% (vs 68,5%) | +0,83% (vs +0,58%) |
+| `BSJP_MOMBB_LUAS` (cadangan) | + naik < 10% + IHSG naik 5 hari | 64% (vs 60%) | +0,61% (vs +0,51%) |
+| `BPJS_DIP2` | DIP + IBS < 0,2 (close dekat low) | 61% (vs 57,5%) | +2,5% (vs +1,7%) |
+
+- Buy the dip saat IHSG turun hanya 1–2%: rugi (−0,7%). Keunggulan ada di hari panik besar.
+- Top-N per hari menurunkan hasil BPJS (keranjang lebih baik) dan tidak membantu BSJP.
+- Swing: 26 filter diuji pada 4 tipe aktif; tidak ada yang lolos walk-forward. Tidak diubah.

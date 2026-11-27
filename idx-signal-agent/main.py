@@ -58,16 +58,35 @@ def render_swing(c: dict, komentar: str = "") -> str:
     return "\n".join(lines)
 
 
+def render_dip_list(items: list) -> str:
+    """BPJS buy the dip: aturan sekali, lalu satu baris per saham (keranjang)."""
+    rows = []
+    for c in items:
+        bintang = "⭐ " if c["signal"]["skor"] >= 100 else ""
+        rows.append(f"🩸 {bintang}<b>{c['kode']}</b> close {fmt(c['close'])} ({dec(c['chg_pct'], 1)}%, "
+                    f"5 hari {dec(c.get('ret5', 0), 1)}%) · nilai {dec(c['value_miliar'])} M")
+    ih = "⭐ = IHSG turun &gt;2% (paling kuat di riset)" if any(c["signal"]["skor"] >= 100 for c in items) else ""
+    return "\n".join([
+        "Buy the dip setelah pasar panik. Riset: menang ±61%, rata-rata +2,5% bersih per trade.",
+        "🟢 <b>Beli besok di pembukaan (09.00)</b>, harga open berapa pun.",
+        "🎯 <b>Jual besok di penutupan</b> (pre-closing 15.50–16.00 / post-trading). Jangan cut di tengah hari.",
+        "🧺 Untungnya dari <b>keranjang</b>: beli beberapa saham sekaligus dengan porsi kecil, "
+        "karena yang memantul paling tinggi sulit ditebak. Diurutkan dari yang paling jatuh 5 hari.",
+        ih, "", *rows,
+        "", "Cek di bot (contoh): " + " · ".join(f"<code>/BOR {c['kode']}</code>" for c in items[:3]),
+    ]).replace("\n\n\n", "\n\n")
+
+
 def render_bpjs(c: dict, komentar: str = "") -> str:
     s, k = c["signal"], c["kode"]
-    if s.get("resep") == "BPJS_DIP":
+    if (s.get("resep") or "").startswith("BPJS_DIP"):
         lines = [f"🩸 <b>{k}</b> · buy the dip · close {fmt(c['close'])} "
                  f"({'+' if c['chg_pct'] >= 0 else ''}{dec(c['chg_pct'], 2)}%) · nilai {dec(c['value_miliar'])} M",
                  html.escape(s["alasan"]),
                  "🟢 <b>Masuk besok di pembukaan (09.00)</b>, harga open berapa pun",
                  "🎯 <b>Keluar besok di penutupan</b> (pre-closing 15.50–16.00 / post-trading), untung atau rugi",
-                 "📊 Riset 3 tahun: menang ±57%, tapi rata-rata untungnya lebih besar dari ruginya "
-                 "(+0,6% s.d. +2% per trade bersih fee). Jangan cut di tengah hari."]
+                 "📊 Riset: menang ±61% (±65% saat IHSG turun >2%), rata-rata +2,5% bersih per trade. "
+                 "Untungnya dari KERANJANG: beli beberapa saham dengan porsi kecil, jangan cut di tengah hari."]
         if komentar:
             lines.append(f"<i>{html.escape(komentar)}</i>")
         lines.append(cek_bot("BPJS", k))
@@ -89,14 +108,18 @@ def render_live(c: dict) -> str:
     head = (f"<b>{k}</b> · skor {s['skor']} · harga {fmt(c['close'])} "
             f"({'+' if c['chg_pct'] >= 0 else ''}{dec(c['chg_pct'], 2)}%) · nilai {dec(c['value_miliar'])} M")
     if s["tipe"] == "BSJP" and (s.get("resep") or "").startswith("BSJP_MOMBB"):
-        utama = s.get("lapis") != "cadangan"
-        head = ("⭐ UTAMA · " if utama else "▫️ CADANGAN · ") + head
+        lapis = s.get("lapis", "utama")
+        label, riset = {
+            "plus": ("⭐⭐ UTAMA+ · ", "📊 Riset: menang ±76%, rata-rata +0,8% bersih per trade (terbaik)."),
+            "utama": ("⭐ UTAMA · ", "📊 Riset: menang ±68%, rata-rata +0,6% bersih per trade."),
+            "cadangan": ("▫️ CADANGAN · ", "📊 Riset: menang ±64%, rata-rata +0,6% bersih per trade."),
+        }.get(lapis, ("", ""))
+        head = label + head
         rencana = [
             f"🟢 <b>Beli SORE INI s.d. 15.49 / post-trading</b> di {fmt(s['beli_bawah'])}–{fmt(s['beli_atas'])}; "
             f"jangan kejar di atas {fmt(s['jangan_di_atas'])}",
             "🎯 <b>Jual BESOK PAGI di pembukaan (09.00, harga open)</b>, untung atau rugi.",
-            ("📊 Riset 3 tahun: menang ±68–72%, rata-rata +0,6% bersih per trade." if utama else
-             "📊 Riset 3 tahun: menang ±56–61%, rata-rata +0,5% bersih per trade (lebih lemah dari utama)."),
+            riset,
         ]
     elif s["tipe"] == "BSJP":
         rencana = [
@@ -168,7 +191,10 @@ def run_scan():
 
     rank = lambda x: (-x["signal"]["skor"], -x["value_miliar"])
     swing_c.sort(key=rank)
-    bpjs_c.sort(key=rank)
+    if aktif["BPJS"].startswith("BPJS_DIP"):     # riset: paling jatuh 5 hari lebih baik dari paling likuid
+        bpjs_c.sort(key=lambda x: (-x["signal"]["skor"], x.get("ret5", 0)))
+    else:
+        bpjs_c.sort(key=rank)
     candidates = (swing_c + bpjs_c)[:config.MAX_AI_CANDIDATES]
 
     picks, ringkasan, ai_ran = None, "", False
@@ -183,9 +209,11 @@ def run_scan():
                 picks = [p for p in result.get("picks", []) if p["id"] in valid]   # guardrail
         except Exception as e:
             print(f"[agent] gagal, pakai sinyal mentah: {e}")
+    dip = aktif["BPJS"].startswith("BPJS_DIP")
+    maks_bpjs = 20 if dip else config.MAX_PER_LIST
     if picks is None:
         picks = [{"id": c["id"], "komentar": ""} for c in swing_c[:config.MAX_SIGNALS * 2]]
-        picks += [{"id": c["id"], "komentar": ""} for c in bpjs_c[:config.MAX_PER_LIST]]
+        picks += [{"id": c["id"], "komentar": ""} for c in bpjs_c[:maks_bpjs]]
 
     chosen = {p["id"]: p["komentar"] for p in picks}
     for c in swing_c + bpjs_c:
@@ -199,8 +227,8 @@ def run_scan():
     for p in picks:
         c = by_id[p["id"]]
         if c["signal"]["mode"] == "next_day":
-            if len(bpjs_cards) < config.MAX_PER_LIST:
-                bpjs_cards.append(render_bpjs(c, p["komentar"]))
+            if len(bpjs_cards) < maks_bpjs:
+                bpjs_cards.append(c if dip else render_bpjs(c, p["komentar"]))
             continue
         if c["kode"] in seen:                           # satu saham satu kartu
             seen[c["kode"]]["signal"].setdefault("juga", []).append(c["signal"]["tipe"])
@@ -217,7 +245,11 @@ def run_scan():
     if ringkasan:
         parts.append(html.escape(ringkasan))
     parts.append(f"<b>━━ ☀️ Daftar BPJS besok ({len(bpjs_cards)}) ━━</b>")
-    parts += bpjs_cards or ["Tidak ada kandidat BPJS."]
+    if dip and bpjs_cards:
+        parts.append(render_dip_list(bpjs_cards))
+    else:
+        parts += bpjs_cards or ["Tidak ada kandidat BPJS (buy the dip hanya muncul saat IHSG turun >1%)."
+                                if dip else "Tidak ada kandidat BPJS."]
     parts.append(f"<b>━━ Sinyal swing ({len(swing_cards)}) ━━</b>")
     if pasar.get("ihsg_up50") is False:
         parts.append("⏸ Swing ditahan: IHSG di bawah MA50. Riset 2 tahun: swing rugi saat pasar turun.")
@@ -252,13 +284,15 @@ def run_live(kind: str, uji: bool = False):
 
     semalam = journal.bpjs_semalam(today) if kind == "bpjs" else set()
     resep_bsjp = strategi.load()["BSJP"]
+    pasar_live = data.ihsg_live() if kind == "bsjp" else {}
+    print(f"[{kind}] IHSG: {pasar_live}")
     hasil, gagal, n_hari_ini = [], {}, 0
     for kode, df in cache.items():
         if str(df.index[-1].date()) != today:
             continue
         n_hari_ini += 1
         try:
-            r = signals.bpjs_live(kode, df, frac, semalam) if kind == "bpjs" else signals.bsjp(kode, df, frac, resep_bsjp)
+            r = signals.bpjs_live(kode, df, frac, semalam) if kind == "bpjs" else signals.bsjp(kode, df, frac, resep_bsjp, pasar_live)
             if not r and kind == "bsjp":
                 for alasan in signals.bsjp_diagnosa(df, frac, resep_bsjp):
                     gagal[alasan] = gagal.get(alasan, 0) + 1

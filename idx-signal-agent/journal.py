@@ -90,7 +90,7 @@ def _evaluate(row: dict, df: pd.DataFrame) -> dict | None:
 
     mode = row.get("mode") or ("warning" if row["tipe"] in ("VAL_BREAKDOWN", "EXIT_WARNING") else "swing")
 
-    if mode == "next_day" and row.get("resep") == "BPJS_DIP":   # beli open, jual close besok
+    if mode == "next_day" and (row.get("resep") or "").startswith("BPJS_DIP"):   # beli open, jual close
         bar = after.iloc[0]
         o = float(bar["Open"])
         px = float(bar["Close"])

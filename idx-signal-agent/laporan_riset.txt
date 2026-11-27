@@ -1,42 +1,36 @@
-🔬 <b>Laporan Riset Strategi</b> · 26 Nov 2026
+🔬 <b>Laporan Riset Ronde 2</b> · 27 Nov 2026
 
-Data harian 891 saham, 3 tahun (Nov 2023 – Nov 2026). ±46 ribu kombinasi analisa diuji, termasuk di luar skill (RSI2, posisi close di candle, Bollinger, gap, IHSG, breadth, 52 minggu). Semua angka sudah dipotong fee 0,4%; swing juga dipotong biaya 1 tick.
-Periode: <b>cari</b> Okt 2024–Jan 2026 → <b>saring</b> Jan–Jul 2026 → <b>uji</b> Jul–Nov 2026 (tidak dipakai saat memilih).
+Data harian 891 saham, Okt 2024 – Nov 2026, bersih fee 0,4% (swing juga dipotong 1 tick).
+Cara uji lebih ketat dari ronde 1: <b>walk-forward 5 periode berurutan</b>. Perbaikan hanya diterima kalau winrate DAN rata-rata untung lebih baik dari versi lama di minimal 4 dari 5 periode.
+Fitur baru yang diuji: kekuatan relatif vs semua saham (ranking), vs IHSG, IHSG 5 &amp; 20 hari, posisi harga dalam rentang 20 hari, susunan MA, volume mengering, hari dalam seminggu, ranking nilai transaksi.
 
-<b>━━ Temuan utama ━━</b>
-• Winrate mendekati 100% <b>tidak ada</b> yang jujur. Yang bertahan di periode uji: 55–72%.
-• Hasil awal 85–89% menang ternyata palsu: saham terkunci ARA 10% (FCA) yang aslinya tidak bisa dibeli. Sekarang otomatis dibuang.
-• IHSG jatuh ±35% (8.647 → 5.643, Des 2025–Jun 2026). Di periode itu hampir semua strategi beli rugi.
+<b>━━ 🌙 BSJP (beli SORE, jual BESOK PAGI di open) ━━</b>
+Sekarang 3 lapis:
+⭐⭐ <b>UTAMA+</b> (baru): tembus upper BB, naik 4–10% (bukan pucuk), rata nilai ≥50 M, harga 200–1.000, <b>IHSG naik dalam 5 hari terakhir</b>
+   Menang <b>76%</b> (sebelumnya 68,5%) · rata-rata <b>+0,83%</b> (sebelumnya +0,58%) · positif di 5/5 periode
+   Kode bot, 6 bulan terakhir: menang 83%, +1,21% per trade
+⭐ <b>UTAMA</b>: syarat lama (menang 68,5%, +0,58%)
+▫️ <b>CADANGAN</b> (diperbaiki): + naik 4–10% + IHSG naik 5 hari
+   Menang <b>64%</b> (sebelumnya 60%) · rata-rata +0,61% (sebelumnya +0,51%) · positif di 5/5 periode
+Catatan: memilih 2–3 saham "terbaik" per hari tidak menaikkan hasil.
 
-<b>━━ 🌙 BSJP: aktif = BSJP_MOMBB ━━</b>
-Syarat: close tembus upper Bollinger, naik &gt;4%, rata nilai 20 hari ≥50 M, harga 200–1.000.
-Masuk: beli sore / post-trading. Keluar: <b>jual di open besok</b>, untung atau rugi.
-Menang: 68% (cari) · 67% (saring) · 72% (uji)
-Rata-rata bersih: +0,6% · +0,6% · +0,8% per trade
-Muncul ±1 sinyal tiap 3 hari.
-Resep lama (LONGGAR/KETAT/HC2D) menang 49–59% tapi rata-rata ±0% atau rugi.
-
-<b>━━ 🩸 BPJS: aktif = BPJS_DIP ━━</b>
-Syarat: saham turun &gt;4%, close di bawah lower Bollinger, IHSG turun &gt;1%, rata nilai ≥10 M.
-Masuk: <b>beli di open besok</b>. Keluar: <b>jual di close besok</b>, jangan cut di tengah hari.
-Menang: 57% · 57% · 59%
-Rata-rata bersih: +0,6% · +2,1% · +2,1% per trade (untung rata-rata lebih besar dari rugi)
-Hanya muncul di hari pasar turun tajam.
-Resep BPJS momentum lama (SKOR8/KOKO/HC2D/GREEN_HAMMER) menang cuma 26–33% dan selalu rugi.
-BPJS live pagi (09.00–11.00) tetap jalan seperti biasa.
+<b>━━ ☀️ BPJS buy the dip (beli OPEN besok, jual CLOSE besok) ━━</b>
+<b>BPJS_DIP2</b> (baru): turun &gt;4%, di bawah lower BB, IHSG turun &gt;1%, rata nilai ≥10 M, + <b>close dekat low hari itu</b> (kapitulasi)
+   Menang <b>61%</b> (sebelumnya 57,5%) · rata-rata <b>+2,5%</b> (sebelumnya +1,7%)
+   Kode bot, 6 bulan terakhir: menang 59,7%, +2,09% (DIP lama 56,3%, +1,67%)
+⭐ Saat IHSG turun &gt;2%: menang 65%, +3,4%
+Temuan penting:
+• Saat IHSG turun hanya 1–2%, buy the dip justru <b>rugi</b> (−0,7%). Keunggulannya ada di hari panik besar.
+• Memilih 3–5 saham "terbaik" per hari <b>menurunkan</b> hasil (61% → 53–55%). Untungnya dari <b>keranjang</b>: beli beberapa saham, porsi kecil.
+→ Bot sekarang mengirim sampai 20 saham dalam format daftar ringkas, diurutkan dari yang paling jatuh 5 hari.
 
 <b>━━ 📈 Swing ━━</b>
-Tidak ada kombinasi baru yang lolos meyakinkan. Kandidat terbaik (menang 95% di periode uji) hanya bertumpu pada 18 saham dan saham gocap; tanpa saham &lt;100 hasil periode cari rugi. Tidak dipakai.
+26 filter tambahan diuji pada 4 tipe aktif (MA_GC, GZ_FIBO, FR4_BREAKOUT, HBO_VOL). <b>Tidak ada yang lolos</b> walk-forward (hanya lebih baik di 1–2 dari 5 periode). Kerugian swing terkumpul di periode crash Mar–Jul 2026 apa pun filternya.
+→ Swing <b>tidak diubah</b>: 4 tipe, hanya saat IHSG di atas MA50. Hasil 2 tahun: menang 48%, rata-rata +3,3% per trade (untung jauh lebih besar dari rugi).
+Sekarang IHSG masih di bawah MA50 → swing tetap ditahan.
 
-10 tipe swing bot (skill HQSaham) diuji 2 tahun, dengan filter <b>IHSG di atas MA50</b>:
-✅ MA_GC: menang 45% · 52% (cari · uji), rata-rata +3,2% · +3,3%
-✅ GZ_FIBO: menang 50% · 62%, rata-rata +3,2% · +4,4%
-✅ FR4_BREAKOUT: menang 45% · 53%, rata-rata +2,9% · +1,9%
-✅ HBO_VOL: menang 49% · 50%, rata-rata +6,9% · +1,6%
-❌ VP_VAL_BOUNCE, FR2_PULLBACK, BB_BOUNCE, STATS_REV, FCAAK: rugi di semua periode → dinonaktifkan
-Gaya swing ini menang ±50%, tapi untungnya jauh lebih besar dari ruginya (trend following).
-
-<b>Aturan baru:</b> swing hanya dikirim saat IHSG di atas MA50. Sekarang IHSG 5.242 &lt; MA50 5.617, jadi <b>swing ditahan dulu</b> sampai pasar pulih.
-
-<b>━━ Batasan ━━</b>
-Data harian (urutan naik-turun dalam sehari tidak diketahui; kalau target &amp; cut tersentuh di hari yang sama dihitung kena cut), hanya saham yang masih tercatat sekarang, dan hasil masa lalu bukan jaminan. Evaluasi tiap Sabtu terus memantau dan mengganti resep kalau menurun.
+<b>━━ Ringkas ━━</b>
+✅ BSJP: lebih baik (76% vs 68,5%)
+✅ BPJS: lebih baik (61% vs 57,5%, rata-rata +2,5% vs +1,7%)
+➖ Swing: tidak ada perbaikan yang terbukti, tetap seperti sebelumnya
+Batasan: data harian, hanya saham yang masih tercatat, dan hasil masa lalu bukan jaminan. Evaluasi tiap Sabtu tetap memantau dan mengganti resep kalau menurun.

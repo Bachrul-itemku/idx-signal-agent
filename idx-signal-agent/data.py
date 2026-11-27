@@ -85,10 +85,13 @@ def pasar_series(cache: dict, period: str = "3y") -> dict:
         ic = ihsg["Close"]
         r = (ic / ic.shift(1) - 1) * 100
         up50 = ic > ic.rolling(50).mean()
+        r5 = (ic / ic.shift(5) - 1) * 100
         for d, v in r.dropna().items():
             o = out.setdefault(str(d.date()), {"breadth": 0.0})
             o["ihsg_ret1"] = float(v)
             o["ihsg_up50"] = bool(up50.loc[d])
+            if r5.loc[d] == r5.loc[d]:
+                o["ihsg_ret5"] = float(r5.loc[d])
             ada.add(str(d.date()))
         # Hari yang belum punya IHSG: pakai status MA50 hari bursa sebelumnya
         last_up = None
@@ -106,3 +109,16 @@ def pasar_series(cache: dict, period: str = "3y") -> dict:
         if key not in ada and key in out:
             out[key]["ihsg_ret1"] = float(v)
     return out
+
+
+def ihsg_live() -> dict:
+    """IHSG saat jam bursa (data telat ±15 menit): return 1 & 5 hari."""
+    ihsg = fetch_symbol("^JKSE", "1mo")
+    if ihsg is None:
+        return {}
+    ic = ihsg["Close"].dropna()
+    if len(ic) < 6:
+        return {}
+    return {"ihsg_ret1": float((ic.iloc[-1] / ic.iloc[-2] - 1) * 100),
+            "ihsg_ret5": float((ic.iloc[-1] / ic.iloc[-6] - 1) * 100),
+            "tanggal": str(ic.index[-1].date())}

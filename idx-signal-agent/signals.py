@@ -106,6 +106,8 @@ def _filters(df, pasar: dict | None = None) -> dict:
         "DEKAT_LO52": last["Low250"] == last["Low250"] and c <= last["Low250"] * 1.10,
         "TERKUNCI": terkunci(c, h, l, chg, last["Flat20"]),
         "IHSG_TURUN1": bool((pasar or {}).get("ihsg_ret1", 0) < -1),
+        "IHSG_TURUN2": bool((pasar or {}).get("ihsg_ret1", 0) < -2),
+        "IBS": (c - l) / (h - l) if h > l else 0.5,
         "BREADTH50": bool((pasar or {}).get("breadth", 0) > 0.5),
         "_chg": chg, "_vol_ratio": vol_ratio, "_value_m": value_m,
     }
@@ -251,22 +253,21 @@ def bsjp_diagnosa(df, frac: float, resep: str = "BSJP_MOMBB") -> list[str]:
     return out
 
 
-def bsjp(kode: str, df, frac: float = 1.0, resep: str | None = None) -> dict | None:
+def bsjp(kode: str, df, frac: float = 1.0, resep: str | None = None, pasar: dict | None = None) -> dict | None:
     """BSJP live (15.00–15.50 WIB) dengan resep aktif dari strategi.json."""
     if len(df) < 30:
         return None
     b = bar_view(enrich(df), -1, frac)
+    b["ihsg_ret5"] = (pasar or {}).get("ihsg_ret5", 0)
     resep = resep or recipes.DEFAULT["BSJP"]
-    r = bsjp_dari_bar(kode, b, resep)
-    if r:
-        r["signal"]["lapis"] = "utama"
-        return r
-    cad = recipes.BSJP_CADANGAN.get(resep)
-    r = bsjp_dari_bar(kode, b, cad) if cad else None
-    if r:
-        r["signal"]["lapis"] = "cadangan"
-        r["signal"]["skor"] = min(r["signal"]["skor"], 75)      # selalu di bawah lapis utama
-    return r
+    lapis = recipes.BSJP_LAPIS.get(resep, [("utama", resep)])
+    for urut, (nama_lapis, r_nama) in enumerate(lapis):
+        r = bsjp_dari_bar(kode, b, r_nama)
+        if r:
+            r["signal"]["lapis"] = nama_lapis
+            r["signal"]["skor"] = min(r["signal"]["skor"], 100 - 15 * urut)   # plus > utama > cadangan
+            return r
+    return None
 
 
 def plan_bpjs_live(price: float, open_: float) -> dict:
@@ -339,6 +340,7 @@ def analyze(kode: str, df, aktif: dict | None = None, pasar: dict | None = None)
         "value_miliar": round(f["_value_m"], 2),
         "value_ma20_miliar": round(float(last["ValueMA20"]) / 1e9, 2),
         "rsi": round(float(last["RSI"]), 1),
+        "ret5": round((c / float(df["Close"].iloc[-6]) - 1) * 100, 2),
         "ma20": round(float(last["MA20"])), "ma50": round(float(last["MA50"])),
         "poc": round(vp["poc"]), "vah": round(vp["vah"]), "val": round(vp["val"]),
         "fractal_merah": last_red, "fractal_hijau": last_green,
@@ -446,8 +448,14 @@ def analyze(kode: str, df, aktif: dict | None = None, pasar: dict | None = None)
     resep_bpjs = (aktif or recipes.DEFAULT)["BPJS"]
     skor = recipes.BPJS[resep_bpjs][1](f)
     if skor:
-        alasan = ("Buy the dip: turun >4%, di bawah lower BB, IHSG turun >1%" if resep_bpjs == "BPJS_DIP"
-                  else f"Resep {resep_bpjs}")
+        if resep_bpjs.startswith("BPJS_DIP"):
+            ih = (pasar or {}).get("ihsg_ret1", 0)
+            alasan = (f"Buy the dip: turun {abs(f['_chg']):.1f}%, di bawah lower BB, close dekat low, "
+                      f"IHSG {ih:+.1f}%").replace(".", ",")
+            if f["IHSG_TURUN2"]:
+                alasan = "⭐ IHSG turun >2% (paling kuat di riset) · " + alasan
+        else:
+            alasan = f"Resep {resep_bpjs}"
         add("BPJS", skor, {**plan_bpjs(c), "resep": resep_bpjs}, mode="next_day", alasan=alasan)
 
     # 10) Peringatan exit: FR5 (fractal hijau jebol) atau breakdown VAL

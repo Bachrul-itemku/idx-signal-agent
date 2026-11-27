@@ -67,6 +67,7 @@ def backtest(cache: dict) -> tuple[dict, str, int]:
             tgl = str(df.index[i].date())
             tanggal_uji.add(tgl)
             b = signals.bar_view(dfe, i, 1.0)
+            b["ihsg_ret5"] = pasar.get(tgl, {}).get("ihsg_ret5", 0)
             if b["c"] < config.MIN_PRICE or not (b["val_avg"] >= config.MIN_VALUE_MILIAR):
                 continue
             # BSJP
