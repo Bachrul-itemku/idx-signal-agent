@@ -18,15 +18,23 @@ def _chunks(text: str):
         yield buf
 
 
-def send(text: str) -> None:
+def send(text: str) -> bool:
+    """Kirim pesan. Kalau HTML ditolak Telegram, kirim ulang sebagai teks biasa."""
     if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
         print("[telegram] token/chat_id kosong, cetak saja:\n" + text)
-        return
+        return True
     url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
+    ok = True
     for part in _chunks(text):
         r = requests.post(url, data={
             "chat_id": config.TELEGRAM_CHAT_ID, "text": part,
             "parse_mode": "HTML", "disable_web_page_preview": True,
         }, timeout=20)
         if not r.ok:
-            print(f"[telegram] error {r.status_code}: {r.text}")
+            print(f"[telegram] error {r.status_code}: {r.text}; kirim ulang tanpa format")
+            import html as _h, re as _re
+            polos = _h.unescape(_re.sub(r"<[^>]+>", "", part))
+            r = requests.post(url, data={"chat_id": config.TELEGRAM_CHAT_ID, "text": polos,
+                                         "disable_web_page_preview": True}, timeout=20)
+            ok = ok and r.ok
+    return ok

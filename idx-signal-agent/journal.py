@@ -118,7 +118,7 @@ def _evaluate(row: dict, df: pd.DataFrame) -> dict | None:
         entry = float(day["Close"].iloc[0]) if len(day) else row["close"]
         bar = after.iloc[0]
         o = float(bar["Open"])
-        if row.get("resep") == "BSJP_MOMBB":   # hasil riset: jual di open, apa pun hasilnya
+        if (row.get("resep") or "").startswith("BSJP_MOMBB"):   # riset: jual di open, apa pun hasilnya
             return {"status": "WIN" if o > entry else "LOSS", "exit_date": str(after.index[0].date()),
                     "exit_price": o, "result_pct": round((o / entry - 1) * 100, 2), "hold_days": 1}
         tp, sl = entry * 1.02, row["sl"] or entry * 0.97

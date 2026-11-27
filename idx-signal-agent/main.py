@@ -88,12 +88,15 @@ def render_live(c: dict) -> str:
     s, k = c["signal"], c["kode"]
     head = (f"<b>{k}</b> · skor {s['skor']} · harga {fmt(c['close'])} "
             f"({'+' if c['chg_pct'] >= 0 else ''}{dec(c['chg_pct'], 2)}%) · nilai {dec(c['value_miliar'])} M")
-    if s["tipe"] == "BSJP" and s.get("resep") == "BSJP_MOMBB":
+    if s["tipe"] == "BSJP" and (s.get("resep") or "").startswith("BSJP_MOMBB"):
+        utama = s.get("lapis") != "cadangan"
+        head = ("⭐ UTAMA · " if utama else "▫️ CADANGAN · ") + head
         rencana = [
-            f"🟢 <b>Masuk sekarang s.d. 15.49 / post-trading</b> di {fmt(s['beli_bawah'])}–{fmt(s['beli_atas'])}; "
+            f"🟢 <b>Beli SORE INI s.d. 15.49 / post-trading</b> di {fmt(s['beli_bawah'])}–{fmt(s['beli_atas'])}; "
             f"jangan kejar di atas {fmt(s['jangan_di_atas'])}",
-            "🎯 <b>Keluar besok di pembukaan (09.00, harga open)</b>, untung atau rugi. "
-            "Riset 3 tahun: jual di open paling konsisten (menang ±68%, rata-rata +0,6% bersih).",
+            "🎯 <b>Jual BESOK PAGI di pembukaan (09.00, harga open)</b>, untung atau rugi.",
+            ("📊 Riset 3 tahun: menang ±68–72%, rata-rata +0,6% bersih per trade." if utama else
+             "📊 Riset 3 tahun: menang ±56–61%, rata-rata +0,5% bersih per trade (lebih lemah dari utama)."),
         ]
     elif s["tipe"] == "BSJP":
         rencana = [
@@ -311,6 +314,9 @@ def ringkasan(kind: str):
     """Laporan harian yang SELALU dikirim: berapa kali dicek, hasilnya, dan penyebab kalau kosong."""
     wib = now_wib()
     today = wib.date().isoformat()
+    if journal.runs_hari_ini(today, f"ringkasan-{kind}"):
+        print(f"Ringkasan {kind} hari ini sudah dikirim.")
+        return
     runs = journal.runs_hari_ini(today, kind)
     if not runs and kind == "bsjp" and wib.hour * 60 + wib.minute <= 16 * 60 + 12:
         run_live("bsjp")                              # belum pernah dicek: cek sekarang (post-trading)
@@ -335,9 +341,39 @@ def ringkasan(kind: str):
             if last["gagal"]:
                 top = sorted(last["gagal"].items(), key=lambda x: -x[1])[:4]
                 p.append("Syarat yang paling sering gagal (pengecekan terakhir):\n" + "\n".join(
-                    f"• {LABEL_GAGAL.get(k, k)}: {v} saham" for k, v in top))
-            p.append("Artinya pasar sore ini tidak memberi setup BSJP yang sesuai resep. Ini normal di hari lesu.")
-    telegram_send.send("\n\n".join(p))
+                    f"• {html.escape(LABEL_GAGAL.get(k, k))}: {v} saham" for k, v in top))
+            p.append("Artinya hari ini tidak ada setup yang sesuai resep. Ini normal di hari lesu.")
+    if telegram_send.send("\n\n".join(p)):
+        journal.log_run(today, f"ringkasan-{kind}", f"{wib:%H.%M}", 0, 0, 0, 0, {})
+
+
+def loop_live(kind: str):
+    """Satu run panjang: cek tiap ±10 menit sampai jendela habis, lalu kirim ringkasan.
+    Tidak bergantung pada jadwal GitHub yang sering molor."""
+    import time as _t
+    mulai, akhir = (14 * 60 + 45, 15 * 60 + 58) if kind == "bsjp" else (9 * 60 + 2, 11 * 60 + 5)
+    if journal.runs_hari_ini(now_wib().date().isoformat(), f"ringkasan-{kind}"):
+        print(f"Loop {kind} hari ini sudah selesai.")
+        return
+    while True:
+        wib = now_wib()
+        m = wib.hour * 60 + wib.minute
+        if m > akhir:
+            break
+        if m >= mulai:
+            t0 = _t.time()
+            try:
+                run_live(kind)
+            except Exception as e:
+                print(f"[loop] {kind} error: {e}")
+            tunggu = max(60, 600 - (_t.time() - t0))           # ±10 menit per putaran
+        else:
+            tunggu = min(600, (mulai - m) * 60)
+        sisa = (akhir - (now_wib().hour * 60 + now_wib().minute)) * 60
+        if sisa <= 0:
+            break
+        _t.sleep(min(tunggu, max(sisa, 60)))
+    ringkasan(kind)
 
 
 def run_auto():
@@ -350,8 +386,8 @@ def run_auto():
         run_live("bpjs")
     elif 11 * 60 + 10 < m <= 12 * 60:
         ringkasan("bpjs")
-    elif 14 * 60 + 45 <= m <= 15 * 60 + 58:
-        run_live("bsjp")
+    elif 13 * 60 + 30 <= m <= 15 * 60 + 58:
+        loop_live("bsjp")
     elif 15 * 60 + 58 < m <= 17 * 60 + 15:
         ringkasan("bsjp")
     elif m >= 17 * 60 + 30:
@@ -366,6 +402,8 @@ if __name__ == "__main__":
         telegram_send.send(journal.stats_text())
     elif cmd in ("bsjp", "bpjs"):
         run_live(cmd)
+    elif cmd in ("loop-bsjp", "loop-bpjs"):
+        loop_live(cmd.split("-")[1])
     elif cmd in ("ringkasan-bsjp", "ringkasan-bpjs"):
         ringkasan(cmd.split("-")[1])
     elif cmd in ("bsjp-uji", "bpjs-uji"):

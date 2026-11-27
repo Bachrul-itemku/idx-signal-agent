@@ -202,7 +202,7 @@ def bsjp_dari_bar(kode, b, resep: str) -> dict | None:
     core, bonus = recipes.BSJP[resep][1](b)
     if not core:
         return None
-    if resep == "BSJP_MOMBB":
+    if resep.startswith("BSJP_MOMBB"):
         alasan = (f"Momentum: tembus upper BB, naik {b['chg']:.1f}%, likuid (rata nilai "
                   f"{b['val_avg']:.0f} M)").replace(".", ",")
     else:
@@ -256,7 +256,17 @@ def bsjp(kode: str, df, frac: float = 1.0, resep: str | None = None) -> dict | N
     if len(df) < 30:
         return None
     b = bar_view(enrich(df), -1, frac)
-    return bsjp_dari_bar(kode, b, resep or recipes.DEFAULT["BSJP"])
+    resep = resep or recipes.DEFAULT["BSJP"]
+    r = bsjp_dari_bar(kode, b, resep)
+    if r:
+        r["signal"]["lapis"] = "utama"
+        return r
+    cad = recipes.BSJP_CADANGAN.get(resep)
+    r = bsjp_dari_bar(kode, b, cad) if cad else None
+    if r:
+        r["signal"]["lapis"] = "cadangan"
+        r["signal"]["skor"] = min(r["signal"]["skor"], 75)      # selalu di bawah lapis utama
+    return r
 
 
 def plan_bpjs_live(price: float, open_: float) -> dict:

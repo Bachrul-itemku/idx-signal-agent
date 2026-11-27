@@ -42,7 +42,17 @@ def _bsjp_mombb(b):
     return core, [b["vol_adj"] >= 2, b["hc2d"], b["near_high"], b["chg"] <= 10]
 
 
+def _bsjp_mombb_luas(b):
+    # Cadangan: tembus upper BB, naik >4%, rata nilai ≥20 M, harga 100–2.000; jual di open besok.
+    # Riset: ±1,7 sinyal/hari, menang 61% / 59% / 56%, rata-rata +0,5% / +0,7% / +0,5% bersih.
+    core = (b["c"] > b["bb_up"] and b["chg"] > 4 and b["val_avg"] >= 20 and 100 <= b["c"] <= 2000)
+    return core, [b["vol_adj"] >= 2, b["hc2d"], b["near_high"], b["chg"] <= 10]
+
+
+BSJP_CADANGAN = {"BSJP_MOMBB": "BSJP_MOMBB_LUAS"}   # resep aktif → lapis cadangan
+
 BSJP = {
+    "BSJP_MOMBB_LUAS": ("Cadangan: tembus upper BB, naik >4%, rata nilai ≥20 M, harga 100–2.000; jual di open", _bsjp_mombb_luas),
     "BSJP_MOMBB": ("Riset: tembus upper BB, naik >4%, rata nilai ≥50 M, harga 200–1000; jual di open", _bsjp_mombb),
     "BSJP_LONGGAR": ("IJO,KOKO,PASMA20,TVAL5,PCH 2–15%", _bsjp_longgar),
     "BSJP_KETAT": ("+ close = high (CH)", _bsjp_ketat),
