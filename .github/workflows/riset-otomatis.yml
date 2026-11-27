@@ -27,6 +27,9 @@ jobs:
           cache: pip
           cache-dependency-path: idx-signal-agent/requirements.txt
       - run: pip install -r requirements.txt
+
+      - name: Ambil jurnal & strategi terbaru (hindari salinan lama dari pemicu yang antre)
+        run: git fetch -q --depth=1 origin main && git reset -q --hard FETCH_HEAD
       - name: Pilih cara terbaik (winrate tertinggi) untuk BSJP, BPJS, swing
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

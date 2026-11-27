@@ -9,6 +9,8 @@ on:
     - cron: "20 4 * * 1-5"          # 11.20 WIB: ringkasan BPJS live
     # BSJP: satu run panjang yang cek sendiri tiap ±10 menit 14.45–15.58 lalu kirim ringkasan.
     # Beberapa pemicu cadangan karena jadwal GitHub sering molor ±1 jam.
+    - cron: "40 5 * * 1-5"          # 12.40 WIB
+    - cron: "10 6 * * 1-5"          # 13.10 WIB
     - cron: "40 6 * * 1-5"          # 13.40 WIB
     - cron: "10 7 * * 1-5"          # 14.10 WIB
     - cron: "40 7 * * 1-5"          # 14.40 WIB
@@ -35,7 +37,7 @@ defaults:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 170
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
@@ -46,6 +48,9 @@ jobs:
           cache-dependency-path: idx-signal-agent/requirements.txt
 
       - run: pip install -r requirements.txt
+
+      - name: Ambil jurnal & strategi terbaru (hindari salinan lama dari pemicu yang antre)
+        run: git fetch -q --depth=1 origin main && git reset -q --hard FETCH_HEAD
 
       - name: Jalankan
         env:

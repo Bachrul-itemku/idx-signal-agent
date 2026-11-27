@@ -438,7 +438,7 @@ def run_auto():
         run_live("bpjs")
     elif 11 * 60 + 10 < m <= 12 * 60:
         ringkasan("bpjs")
-    elif 13 * 60 + 30 <= m <= 15 * 60 + 58:
+    elif 12 * 60 + 30 <= m <= 15 * 60 + 58:
         loop_live("bsjp")
     elif 15 * 60 + 58 < m <= 17 * 60 + 15:
         ringkasan("bsjp")
