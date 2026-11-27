@@ -1,18 +1,16 @@
-"""Evaluasi mingguan (Sabtu pagi):
-1. Performa LIVE dari jurnal: 7 hari terakhir vs 28 hari sebelumnya, per jenis sinyal.
-2. BACKTEST ±6 bulan semua varian resep (BSJP, BPJS malam, swing) di saham paling likuid,
-   hasil dipotong perkiraan fee. Dinilai: 6 bulan penuh & 4 minggu terakhir.
-3. Kalau resep aktif MENURUN dan ada varian yang jelas lebih bagus → ganti otomatis
-   (strategi.json), dengan pengaman supaya tidak gonta-ganti karena kebetulan.
+"""Evaluasi swing mingguan (dijalankan Sabtu, setelah riset otomatis BSJP/BPJS).
 
-Batasan backtest: hanya data harian. BSJP dinilai dari candle penuh (aslinya dinilai
-±15.00), urutan intraday tidak diketahui (kalau SL & TP tersentuh di hari yang sama
-dianggap kena SL), dan sinyal teratas per hari tidak dibatasi 10 seperti live."""
-import html
+Prinsip sama dengan BSJP/BPJS: pakai cara dengan WINRATE tertinggi yang rata-ratanya tetap untung.
+1. Backtest ±2 tahun semua tipe swing (hanya saat IHSG > MA50) di 300 saham terlikuid,
+   bersih fee 0,4% + biaya 1 tick.
+2. Tiap tipe diuji dengan beberapa jarak target jual: bawaan, 1R, 1,5R, 2R (R = jarak entry ke SL).
+   Target lebih dekat biasanya menaikkan winrate.
+3. Syarat sah: ≥50 trade, rata-rata positif, dan tidak rugi di ±6 bulan terakhir (kalau ≥10 trade).
+4. Dipilih maks. 6 tipe dengan winrate (disusutkan untuk sampel kecil) tertinggi.
+   Susunan lama hanya diganti kalau winrate rata-rata naik ≥2 poin."""
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-import pandas as pd
 import config
 import data
 import journal
@@ -21,240 +19,146 @@ import signals
 import strategi
 import telegram_send
 import universe
-from indicators import enrich
+from indicators import round_tick, tick_size
 
-MIN_N_6B, MIN_N_4M = 30, 8          # minimal trade supaya angkanya berarti
-MARGIN = 0.2                         # resep baru harus unggul ≥0,2% per trade (6 bulan)
-COOLDOWN_HARI = 13                   # jangan ganti kategori yang sama dua minggu berturut
-
-
-def _row(r):
-    s = r["signal"]
-    return {"tanggal": r["tanggal"], "close": r["close"], "entry": s.get("entry"), "sl": s.get("sl"),
-            "tp1": s.get("tp1"), "mode": s["mode"], "tipe": s["tipe"], "resep": s.get("resep")}
+VARIAN = ["bawaan", 1.0, 1.5, 2.0]
+HARI = 480                 # ±2 tahun bursa
+SAHAM = 300
+TERBARU = 126              # ±6 bulan terakhir
+MAKS_TIPE = 6
 
 
-def _metrics(trades, batas_4m: str) -> dict:
-    """trades = [(tanggal_sinyal, hasil_bersih_%)]"""
-    def m(xs):
-        if not xs:
-            return {"n": 0, "wr": 0.0, "exp": 0.0}
-        return {"n": len(xs), "wr": round(100 * sum(x > 0 for x in xs) / len(xs), 1),
-                "exp": round(sum(xs) / len(xs), 2)}
-    return {"6b": m([p for _, p in trades]), "4m": m([p for t, p in trades if t >= batas_4m])}
+def _row(info, sig, k):
+    tp = sig["tp1"]
+    if k != "bawaan":
+        tp = round_tick(sig["entry"] + k * (sig["entry"] - sig["sl"]), "up")
+    return {"tanggal": info["tanggal"], "close": info["close"], "entry": sig["entry"], "sl": sig["sl"],
+            "tp1": tp, "mode": "swing", "tipe": sig["tipe"], "resep": None}
 
 
 def backtest(cache: dict) -> tuple[dict, str, int]:
-    """Return ({(kategori, nama): metrics}, tanggal_awal_4_minggu, jumlah_saham_diuji)."""
     t0 = time.time()
-    liquid = []
-    for kode, df in cache.items():
-        if len(df) < 300:
-            continue
-        val = float((df["Close"] * df["Volume"]).tail(20).mean()) / 1e9
-        if val >= config.MIN_VALUE_MILIAR and float(df["Close"].iloc[-1]) >= config.MIN_PRICE:
-            liquid.append((val, kode))
-    liquid = [k for _, k in sorted(liquid, reverse=True)[:config.BT_MAX_SAHAM]]
-
+    liquid = sorted(((float((df["Close"] * df["Volume"]).tail(250).mean()) / 1e9, k)
+                     for k, df in cache.items() if len(df) > 300), reverse=True)
+    liquid = [k for v, k in liquid if v >= config.MIN_VALUE_MILIAR][:SAHAM]
     pasar = data.pasar_series(cache, period="3y")
+    semua_tgl = sorted({d for k in liquid for d in cache[k].index})
+    batas_baru = str(semua_tgl[-TERBARU].date()) if len(semua_tgl) > TERBARU else ""
     trades = defaultdict(list)
-    tanggal_uji = set()
     for n, kode in enumerate(liquid):
         df = cache[kode]
-        dfe = enrich(df)
-        start = len(df) - config.BT_HARI
-        for i in range(start, len(df) - 1):          # hari terakhir belum punya hasil
+        mulai = max(260, len(df) - HARI)
+        for i in range(mulai, len(df) - 1, 3):
             tgl = str(df.index[i].date())
-            tanggal_uji.add(tgl)
-            b = signals.bar_view(dfe, i, 1.0)
-            b["ihsg_ret5"] = pasar.get(tgl, {}).get("ihsg_ret5", 0)
-            if b["c"] < config.MIN_PRICE or not (b["val_avg"] >= config.MIN_VALUE_MILIAR):
-                continue
-            ps = pasar.get(tgl, {})
-            # Swing (tiap 3 hari supaya cepat)
-            if (i - start) % 3 == 0:
-                info = signals.analyze(kode, df.iloc[max(0, i - 259):i + 1], aktif=None, pasar=ps)
-                for sig in (info or {}).get("signals", []):
-                    if sig["mode"] != "swing":
-                        continue
-                    res = journal._evaluate(_row({**info, "signal": sig}), df)
+            info = signals.analyze(kode, df.iloc[i - 259:i + 1], aktif=None, pasar=pasar.get(tgl, {}))
+            for sig in (info or {}).get("signals", []):
+                if sig["mode"] != "swing":
+                    continue
+                slip = tick_size(info["close"]) / info["close"] * 100
+                for k in VARIAN:
+                    res = journal._evaluate(_row(info, sig, k), df)
                     if res:
-                        trades[("SWING", sig["tipe"])].append((tgl, res["result_pct"] - config.FEE_PCT))
+                        trades[(sig["tipe"], k)].append((tgl, res["result_pct"] - config.FEE_PCT - slip))
         if n % 50 == 0:
-            print(f"[evaluasi] backtest {n}/{len(liquid)} saham, {time.time() - t0:.0f} detik")
-
-    hari = sorted(tanggal_uji)
-    batas_4m = hari[-20] if len(hari) >= 20 else (hari[0] if hari else "")
-    hasil = {k: _metrics(v, batas_4m) for k, v in trades.items()}
-    for t in recipes.SWING_SEMUA:
-        hasil.setdefault(("SWING", t), _metrics([], batas_4m))
-    print(f"[evaluasi] backtest selesai {len(liquid)} saham, {time.time() - t0:.0f} detik")
-    return hasil, batas_4m, len(liquid)
-
-
-def live_stats(today: str) -> dict:
-    """{tipe: {"minggu": m, "sebelum": m}} dari jurnal, hasil bersih fee."""
-    with journal.conn() as c:
-        df = pd.read_sql("SELECT tipe, exit_date, result_pct, status FROM signals "
-                         "WHERE status IN ('WIN','LOSS','EXPIRED')", c)
+            print(f"[evaluasi] swing {n}/{len(liquid)} saham, {time.time() - t0:.0f} dtk")
     out = {}
-    if df.empty:
-        return out
-    d0 = pd.Timestamp(today)
-    df["exit"] = pd.to_datetime(df["exit_date"])
-    df["net"] = df["result_pct"] - config.FEE_PCT
-    for tipe, g in df.groupby("tipe"):
-        mg = g[g["exit"] > d0 - pd.Timedelta(days=7)]["net"]
-        sb = g[(g["exit"] <= d0 - pd.Timedelta(days=7)) & (g["exit"] > d0 - pd.Timedelta(days=35))]["net"]
-        f = lambda s: {"n": len(s), "wr": round(100 * (s > 0).mean(), 1) if len(s) else 0.0,
-                       "exp": round(s.mean(), 2) if len(s) else 0.0}
-        out[tipe] = {"minggu": f(mg), "sebelum": f(sb)}
-    return out
+    for key, xs in trades.items():
+        r = [p for _, p in xs]
+        b = [p for t, p in xs if t >= batas_baru]
+        w = sum(p > 0 for p in r)
+        out[key] = {"n": len(r), "wr": w / len(r), "ex": sum(r) / len(r),
+                    "wr_adj": (w + 0.5 * 20) / (len(r) + 20),
+                    "n_baru": len(b), "wr_baru": (sum(p > 0 for p in b) / len(b)) if b else 0.0,
+                    "ex_baru": (sum(b) / len(b)) if b else 0.0}
+    print(f"[evaluasi] backtest swing selesai {len(liquid)} saham, {time.time() - t0:.0f} dtk")
+    return out, batas_baru, len(liquid)
 
 
-def _menurun(live: dict | None, bt: dict) -> str:
-    """Alasan menurun (string) atau '' kalau tidak menurun."""
-    if live and live["minggu"]["n"] >= 5:
-        mg, sb = live["minggu"], live["sebelum"]
-        if mg["exp"] < 0:
-            return f"live minggu ini rata-rata {mg['exp']:+.2f}%/trade"
-        if sb["n"] >= 10 and mg["wr"] < sb["wr"] - 10:
-            return f"winrate live turun {sb['wr']}% → {mg['wr']}%"
-    if bt["6b"]["n"] >= MIN_N_6B and bt["6b"]["exp"] < 0:
-        return f"backtest 6 bulan negatif ({bt['6b']['exp']:+.2f}%/trade)"
-    if bt["4m"]["n"] >= MIN_N_4M and bt["4m"]["exp"] < bt["6b"]["exp"] - 0.5:
-        return f"4 minggu terakhir melemah ({bt['4m']['exp']:+.2f}% vs {bt['6b']['exp']:+.2f}% rata-rata 6 bulan)"
-    return ""
+def _sah(m):
+    return m["n"] >= 50 and m["ex"] > 0 and (m["n_baru"] < 10 or m["ex_baru"] > 0)
 
 
-def _layak(m: dict) -> bool:
-    return (m["6b"]["n"] >= MIN_N_6B and m["4m"]["n"] >= MIN_N_4M
-            and m["6b"]["exp"] > 0 and m["4m"]["exp"] > 0)
+def _nilai_susunan(bt, susunan: dict) -> float:
+    ms = [bt.get((t, k)) for t, k in susunan.items()]
+    ms = [m for m in ms if m]
+    n = sum(m["n"] for m in ms)
+    return sum(m["wr_adj"] * m["n"] for m in ms) / n if n else 0.0
 
 
-def _baru_saja_ganti(aktif: dict, kategori: str, today: str) -> bool:
-    for r in reversed(aktif.get("riwayat", [])):
-        if r["kategori"] == kategori:
-            return (pd.Timestamp(today) - pd.Timestamp(r["tanggal"])).days < COOLDOWN_HARI
-    return False
-
-
-def putuskan(aktif: dict, bt: dict, live: dict, today: str) -> tuple[dict, list[str]]:
-    baru = {**aktif, "SWING": list(aktif["SWING"]), "riwayat": list(aktif.get("riwayat", []))}
+def putuskan(aktif: dict, bt: dict, today: str) -> tuple[dict, list[str], dict]:
+    baru = {**aktif, "riwayat": list(aktif.get("riwayat", []))}
+    lama = {t: aktif.get("SWING_TP", {}).get(t, "bawaan") for t in aktif["SWING"]}
+    terbaik = {}
+    for t in recipes.SWING_SEMUA:
+        calon = [(bt[(t, k)]["wr_adj"], bt[(t, k)]["ex"], k) for k in VARIAN
+                 if (t, k) in bt and _sah(bt[(t, k)])]
+        if calon:
+            terbaik[t] = max(calon, key=lambda x: (x[0], x[1]))
+    urut = sorted(terbaik.items(), key=lambda x: -x[1][0])[:MAKS_TIPE]
+    usul = {t: v[2] for t, v in urut}
+    skor_lama, skor_usul = _nilai_susunan(bt, lama), _nilai_susunan(bt, usul)
     catatan = []
-
-    catatan.append("🤖 <b>BSJP &amp; BPJS</b>: dipilih riset otomatis tiap Jumat malam (laporan terpisah).")
-    for kat, live_tipe in ():
-        cur = aktif[kat]
-        m_cur = bt[(kat, cur)]
-        alasan = _menurun(live.get(live_tipe), m_cur)
-        if not alasan:
-            catatan.append(f"✅ <b>{kat}</b>: tetap <code>{cur}</code> (tidak menurun)")
-            continue
-        kandidat = sorted([(m["6b"]["exp"], nama) for (k, nama), m in bt.items()
-                           if k == kat and nama != cur and _layak(m)
-                           and m["6b"]["exp"] >= m_cur["6b"]["exp"] + MARGIN
-                           and m["4m"]["exp"] >= m_cur["4m"]["exp"]], reverse=True)
-        if not kandidat:
-            catatan.append(f"⚠️ <b>{kat}</b>: <code>{cur}</code> menurun ({html.escape(alasan)}), "
-                           "tapi belum ada resep lain yang terbukti lebih bagus. Tetap dipakai.")
-        elif _baru_saja_ganti(aktif, kat, today):
-            catatan.append(f"⚠️ <b>{kat}</b>: menurun, kandidat <code>{kandidat[0][1]}</code>, "
-                           "tapi baru diganti <2 minggu lalu. Ditunggu dulu.")
-        elif not config.AUTO_SWITCH:
-            catatan.append(f"💡 <b>{kat}</b>: <code>{cur}</code> menurun ({html.escape(alasan)}). "
-                           f"Usulan: <code>{kandidat[0][1]}</code> (AUTO_SWITCH mati).")
-        else:
-            ke = kandidat[0][1]
-            baru[kat] = ke
-            baru["riwayat"].append({"tanggal": today, "kategori": kat, "dari": cur, "ke": ke, "alasan": alasan})
-            catatan.append(f"🔄 <b>{kat}</b>: diganti <code>{cur}</code> → <code>{ke}</code>. "
-                           f"Alasan: {html.escape(alasan)}.")
-
-    # Swing: pilih ulang himpunan tipe aktif kalau keseluruhan swing menurun
-    swing_live = {"minggu": {"n": 0, "wr": 0, "exp": 0}, "sebelum": {"n": 0, "wr": 0, "exp": 0}}
-    for t in aktif["SWING"]:
-        if t in live:
-            for k in ("minggu", "sebelum"):
-                a, b = swing_live[k], live[t][k]
-                n = a["n"] + b["n"]
-                if n:
-                    a["exp"] = round((a["exp"] * a["n"] + b["exp"] * b["n"]) / n, 2)
-                    a["wr"] = round((a["wr"] * a["n"] + b["wr"] * b["n"]) / n, 1)
-                    a["n"] = n
-    gab = {"6b": {"n": 0, "exp": 0.0}, "4m": {"n": 0, "exp": 0.0}}
-    for t in aktif["SWING"]:
-        for w in ("6b", "4m"):
-            m = bt[("SWING", t)][w]
-            n = gab[w]["n"] + m["n"]
-            if n:
-                gab[w]["exp"] = (gab[w]["exp"] * gab[w]["n"] + m["exp"] * m["n"]) / n
-                gab[w]["n"] = n
-    alasan = _menurun(swing_live, gab)
-    pilihan = [t for _, t in sorted(((bt[("SWING", t)]["6b"]["exp"], t) for t in recipes.SWING_SEMUA
-                                     if _layak(bt[("SWING", t)])), reverse=True)][:6]
-    if not alasan:
-        catatan.append("✅ <b>Swing</b>: tetap " + ", ".join(f"<code>{t}</code>" for t in aktif["SWING"]))
-    elif len(pilihan) < 2 or set(pilihan) == set(aktif["SWING"]):
-        catatan.append(f"⚠️ <b>Swing</b> menurun ({html.escape(alasan)}), belum ada susunan yang lebih bagus.")
-    elif _baru_saja_ganti(aktif, "SWING", today):
-        catatan.append("⚠️ <b>Swing</b> menurun, tapi baru diganti <2 minggu lalu. Ditunggu dulu.")
-    elif not config.AUTO_SWITCH:
-        catatan.append(f"💡 <b>Swing</b> menurun ({html.escape(alasan)}). Usulan: " + ", ".join(pilihan))
+    if not usul:
+        catatan.append("⚠️ <b>Swing</b>: tidak ada tipe yang lolos (rata-rata untung). Susunan lama tetap.")
+        pakai = lama
+    elif not lama or skor_usul >= skor_lama + 0.02:
+        pakai = usul
+        baru["SWING"] = list(usul)
+        baru["SWING_TP"] = {t: k for t, k in usul.items() if k != "bawaan"}
+        baru["riwayat"].append({"tanggal": today, "kategori": "SWING", "dari": lama, "ke": usul})
+        catatan.append(f"🔄 <b>Swing</b> diperbarui: winrate rata-rata {skor_lama:.0%} → {skor_usul:.0%}")
     else:
-        baru["SWING"] = pilihan
-        baru["riwayat"].append({"tanggal": today, "kategori": "SWING", "dari": aktif["SWING"],
-                                "ke": pilihan, "alasan": alasan})
-        keluar = [t for t in aktif["SWING"] if t not in pilihan]
-        masuk = [t for t in pilihan if t not in aktif["SWING"]]
-        catatan.append(f"🔄 <b>Swing</b> disusun ulang ({html.escape(alasan)}). "
-                       f"Masuk: {', '.join(masuk) or '-'} · Keluar: {', '.join(keluar) or '-'}")
+        pakai = lama
+        catatan.append(f"✅ <b>Swing</b> tetap (winrate rata-rata {skor_lama:.0%}; penantang {skor_usul:.0%})")
     baru["riwayat"] = baru["riwayat"][-30:]
-    return baru, catatan
+    return baru, catatan, pakai
 
 
-def _baris(nama, m, aktif):
-    tanda = "▶️" if aktif else "  "
-    return (f"{tanda} <code>{nama}</code> 6bln: {m['6b']['n']} trade, WR {m['6b']['wr']}%, "
-            f"{m['6b']['exp']:+.2f}% · 4mgg: {m['4m']['n']}, WR {m['4m']['wr']}%, {m['4m']['exp']:+.2f}%")
+def _k(k):
+    return "target bawaan" if k == "bawaan" else f"target {str(k).replace('.', ',')}R"
 
 
-def laporan(aktif, baru, bt, live, catatan, today, batas_4m, n_saham) -> str:
-    p = [f"📋 <b>Evaluasi mingguan</b> · {today}",
-         f"Backtest {config.BT_HARI} hari bursa di {n_saham} saham terlikuid, sudah dipotong fee "
-         f"{config.FEE_PCT}%/trade. 4 minggu = sinyal sejak {batas_4m}."]
+def _d(x):
+    return f"{x:+.2f}".replace(".", ",")
+
+
+def laporan(catatan, bt, pakai, today, batas_baru, n_saham) -> str:
+    p = [f"📈 <b>Evaluasi swing mingguan</b> · {today}",
+         f"Backtest ±2 tahun, {n_saham} saham terlikuid, hanya saat IHSG &gt; MA50, bersih fee + 1 tick. "
+         f"Dipilih winrate tertinggi yang rata-ratanya untung. \"Terbaru\" = sejak {batas_baru}."]
     p.append("<b>━━ Keputusan ━━</b>\n" + "\n".join(catatan))
-
-    if live:
-        rows = []
-        for t, v in sorted(live.items()):
-            mg, sb = v["minggu"], v["sebelum"]
-            if mg["n"] or sb["n"]:
-                rows.append(f"• {t}: minggu ini {mg['n']} trade, WR {mg['wr']}%, {mg['exp']:+.2f}% · "
-                            f"4 minggu sebelumnya {sb['n']}, WR {sb['wr']}%, {sb['exp']:+.2f}%")
-        p.append("<b>━━ Hasil live (bersih fee) ━━</b>\n" + ("\n".join(rows) or "Belum ada trade yang selesai."))
-    else:
-        p.append("<b>━━ Hasil live ━━</b>\nBelum ada trade yang selesai. Keputusan minggu ini memakai backtest.")
-
-    for kat, judul in ():
-        rows = sorted(((m["6b"]["exp"], nama, m) for (k, nama), m in bt.items() if k == kat), reverse=True)
-        p.append(f"<b>━━ Backtest {judul} ━━</b>\n" +
-                 "\n".join(_baris(nama, m, nama == baru[kat]) for _, nama, m in rows))
-    rows = sorted(((m["6b"]["exp"], t, m) for (k, t), m in bt.items() if k == "SWING"), reverse=True)
-    p.append("<b>━━ Backtest swing ━━</b>\n" + "\n".join(_baris(t, m, t in baru["SWING"]) for _, t, m in rows))
-    p.append("<i>▶️ = resep aktif minggu depan. WR = winrate. Angka % = rata-rata untung/rugi bersih per trade. "
-             "Backtest bukan jaminan hasil ke depan.</i>")
+    rows = []
+    for t, k in pakai.items():
+        m = bt.get((t, k))
+        if m:
+            rows.append(f"▶️ <code>{t}</code> · {_k(k)}: menang {m['wr']:.0%}, {_d(m['ex'])}%/trade ({m['n']} trade)"
+                        f" · terbaru {m['wr_baru']:.0%}, {_d(m['ex_baru'])}% ({m['n_baru']})")
+    p.append("<b>━━ Swing aktif ━━</b>\n" + ("\n".join(rows) or "-"))
+    lain = []
+    for t in recipes.SWING_SEMUA:
+        if t in pakai:
+            continue
+        cands = [(bt[(t, k)], k) for k in VARIAN if (t, k) in bt]
+        if cands:
+            m, k = max(cands, key=lambda x: x[0]["wr_adj"])
+            lain.append(f"✖️ <code>{t}</code> · {_k(k)}: menang {m['wr']:.0%}, {_d(m['ex'])}% ({m['n']})")
+    if lain:
+        p.append("<b>━━ Tidak dipakai ━━</b>\n" + "\n".join(lain))
+    p.append("<i>Swing tetap hanya dikirim saat IHSG di atas MA50. Hasil masa lalu bukan jaminan.</i>")
     return "\n\n".join(p)
 
 
-def run():
+def run(cache: dict | None = None, kirim: bool = True) -> str:
     today = (datetime.now(timezone.utc) + timedelta(hours=7)).date().isoformat()
     aktif = strategi.load()
-    cache = data.fetch_many(universe.scan_list())
-    journal.update_open(lambda k: cache.get(k))           # tutup sinyal yang sudah selesai dulu
-    bt, batas_4m, n_saham = backtest(cache)
-    live = live_stats(today)
-    baru, catatan = putuskan(aktif, bt, live, today)
+    if cache is None:
+        cache = data.fetch_many(universe.scan_list(), period="3y")
+    journal.update_open(lambda k: cache.get(k))
+    bt, batas_baru, n_saham = backtest(cache)
+    baru, catatan, pakai = putuskan(aktif, bt, today)
     if baru != aktif:
         strategi.save(baru)
-    telegram_send.send(laporan(aktif, baru, bt, live, catatan, today, batas_4m, n_saham))
+    teks = laporan(catatan, bt, pakai, today, batas_baru, n_saham)
+    if kirim:
+        telegram_send.send(teks)
+    return teks

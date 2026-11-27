@@ -1,4 +1,4 @@
-"""Riset otomatis mingguan untuk BSJP & BPJS: cari kombinasi syarat terbaik di data 3 tahun terbaru,
+"""Riset otomatis mingguan (Sabtu) untuk BSJP & BPJS: cari kombinasi syarat terbaik di data 3 tahun terbaru,
 lalu pakai yang terbukti paling bagus.
 
 Cara memilih (anti "kebetulan"):
@@ -155,7 +155,7 @@ def _fmt(st):
 
 def laporan(hasil: dict, awal_hold: str, today: str) -> str:
     ikon = {"plus": "⭐⭐", "utama": "⭐", "cadangan": "▫️"}
-    p = [f"🤖 <b>Riset otomatis mingguan</b> · {today}",
+    p = [f"🤖 <b>Evaluasi mingguan BSJP &amp; BPJS</b> · {today}",
          "Data 3 tahun terbaru semua saham, bersih fee 0,4%. Dipilih di 4 periode lama, "
          f"dikonfirmasi di periode terbaru (sejak {awal_hold}) yang tidak dipakai saat memilih."]
     for fam, judul in (("BSJP", "🌙 BSJP · beli sore, jual besok pagi di open"),
@@ -172,7 +172,8 @@ def laporan(hasil: dict, awal_hold: str, today: str) -> str:
             p.append("\n".join(baris))
         if not hasil[fam]:
             p.append("Tidak ada aturan yang lolos; aturan lama tetap dipakai.")
-    p.append("<i>Aturan diganti hanya kalau penantang jelas lebih unggul. Hasil masa lalu bukan jaminan.</i>")
+    p.append("<i>Skor mengutamakan winrate (rata-rata harus tetap untung). Aturan diganti hanya kalau "
+             "penantang jelas lebih unggul. Hasil masa lalu bukan jaminan.</i>")
     return "\n\n".join(p)
 
 

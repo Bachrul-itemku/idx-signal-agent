@@ -1,8 +1,8 @@
-name: Riset otomatis mingguan
+name: Evaluasi mingguan (BSJP, BPJS, swing)
 
 on:
   schedule:
-    - cron: "13 14 * * 5"     # Jumat 21.13 WIB (setelah bursa tutup & scan malam)
+    - cron: "13 0 * * 6"      # Sabtu 07.13 WIB: riset BSJP/BPJS + evaluasi swing
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   riset:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: idx-signal-agent
@@ -27,17 +27,17 @@ jobs:
           cache: pip
           cache-dependency-path: idx-signal-agent/requirements.txt
       - run: pip install -r requirements.txt
-      - name: Riset & pilih aturan terbaik
+      - name: Pilih cara terbaik (winrate tertinggi) untuk BSJP, BPJS, swing
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main.py riset-otomatis
-      - name: Simpan strategi.json
+        run: python main.py mingguan
+      - name: Simpan strategi.json & jurnal
         run: |
-          if [ -n "$(git status --porcelain strategi.json)" ]; then
+          if [ -n "$(git status --porcelain strategi.json signals.db)" ]; then
             git config user.name "sinyal-bot"
             git config user.email "sinyal-bot@users.noreply.github.com"
-            git add strategi.json
-            git commit -m "Riset otomatis $(date -u +%F): perbarui aturan BSJP/BPJS"
+            for f in strategi.json signals.db; do if [ -f "$f" ]; then git add "$f"; fi; done
+            git commit -m "Evaluasi mingguan $(date -u +%F): perbarui aturan"
             for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 10; done
           fi

@@ -15,7 +15,6 @@ on:
     - cron: "10 8 * * 1-5"          # 15.10 WIB
     - cron: "4 9 * * 1-5"           # 16.04 WIB: ringkasan BSJP (selalu dikirim)
     - cron: "47 11 * * 1-5"         # 18.47 WIB: swing + daftar BPJS besok
-    - cron: "13 1 * * 6"            # Sabtu 08.13 WIB: evaluasi mingguan + ganti resep otomatis
   workflow_dispatch:
     inputs:
       perintah:
@@ -62,9 +61,7 @@ jobs:
         run: |
           JADWAL="${{ github.event.schedule }}"
           PERINTAH="${{ inputs.perintah }}"
-          if [ "$JADWAL" = "13 1 * * 6" ]; then
-            python main.py evaluasi
-          elif [ -n "$JADWAL" ]; then
+          if [ -n "$JADWAL" ]; then
             python main.py auto
           else
             python main.py "${PERINTAH:-scan}"

@@ -472,5 +472,11 @@ def analyze(kode: str, df, aktif: dict | None = None, pasar: dict | None = None)
         out = [x for x in out if x["mode"] != "swing"]
     if aktif is not None:                                   # hanya tipe swing yang aktif
         out = [x for x in out if x["mode"] != "swing" or x["tipe"] in aktif["SWING"]]
+        # Jarak target hasil evaluasi mingguan (winrate tertinggi), mis. 1R / 1,5R / 2R
+        for x in out:
+            k = (aktif.get("SWING_TP") or {}).get(x["tipe"])
+            if x["mode"] == "swing" and isinstance(k, (int, float)) and x.get("sl") and x["entry"] > x["sl"]:
+                x["tp1"] = round_tick(x["entry"] + k * (x["entry"] - x["sl"]), "up")
+                x["rr"] = round((x["tp1"] - x["entry"]) / (x["entry"] - x["sl"]), 2)
     info["signals"] = sorted(out, key=lambda s: -s["skor"])
     return info

@@ -467,6 +467,11 @@ if __name__ == "__main__":
     elif cmd == "riset-otomatis":
         import riset_otomatis
         riset_otomatis.run()
+    elif cmd == "mingguan":                 # Sabtu: riset BSJP/BPJS lalu evaluasi swing, data sama
+        import evaluasi, riset_otomatis
+        cache3 = data.fetch_many(universe.load(), period="3y")
+        riset_otomatis.run(cache=cache3, ihsg=data.fetch_symbol("^JKSE", "3y"))
+        evaluasi.run(cache=cache3)
     elif cmd == "evaluasi":
         import evaluasi
         evaluasi.run()
