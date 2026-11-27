@@ -12,6 +12,8 @@ from datetime import datetime, timedelta, timezone
 import config
 import data
 import journal
+import aturan
+import fitur_bot as fb
 import signals
 import strategi
 import telegram_send
@@ -59,22 +61,27 @@ def render_swing(c: dict, komentar: str = "") -> str:
 
 
 def render_dip_list(items: list) -> str:
-    """BPJS buy the dip: aturan sekali, lalu satu baris per saham (keranjang)."""
+    """BPJS: aturan per lapis sekali, lalu satu baris per saham (keranjang)."""
     rows = []
     for c in items:
-        bintang = "⭐ " if c["signal"]["skor"] >= 100 else ""
+        bintang = "⭐ " if c["signal"].get("lapis") == "plus" else ""
         rows.append(f"🩸 {bintang}<b>{c['kode']}</b> close {fmt(c['close'])} ({dec(c['chg_pct'], 1)}%, "
                     f"5 hari {dec(c.get('ret5', 0), 1)}%) · nilai {dec(c['value_miliar'])} M")
-    ih = "⭐ = IHSG turun &gt;2% (paling kuat di riset)" if any(c["signal"]["skor"] >= 100 for c in items) else ""
+    lapis = []
+    for r in aturan.rules("BPJS"):
+        st = r.get("stat", {})
+        angka = (f" (riset: menang {st['wr_pilih']:.0%}, rata-rata {st['ex_pilih']:+.2f}%)".replace(".", ",")
+                 if st else "")
+        lapis.append(f"{'⭐ ' if r['lapis'] == 'plus' else '• '}<b>{r['lapis']}</b>: "
+                     f"{html.escape(fb.label(r['syarat']))}{angka}")
     return "\n".join([
-        "Buy the dip setelah pasar panik. Riset: menang ±61%, rata-rata +2,5% bersih per trade.",
         "🟢 <b>Beli besok di pembukaan (09.00)</b>, harga open berapa pun.",
         "🎯 <b>Jual besok di penutupan</b> (pre-closing 15.50–16.00 / post-trading). Jangan cut di tengah hari.",
-        "🧺 Untungnya dari <b>keranjang</b>: beli beberapa saham sekaligus dengan porsi kecil, "
-        "karena yang memantul paling tinggi sulit ditebak. Diurutkan dari yang paling jatuh 5 hari.",
-        ih, "", *rows,
+        "🧺 Untungnya dari <b>keranjang</b>: beli beberapa saham sekaligus dengan porsi kecil. "
+        "Diurutkan dari lapis tertinggi, lalu yang paling jatuh 5 hari.",
+        "Aturan aktif (hasil riset otomatis terbaru):", *lapis, "", *rows,
         "", "Cek di bot (contoh): " + " · ".join(f"<code>/BOR {c['kode']}</code>" for c in items[:3]),
-    ]).replace("\n\n\n", "\n\n")
+    ])
 
 
 def render_bpjs(c: dict, komentar: str = "") -> str:
@@ -107,6 +114,14 @@ def render_live(c: dict) -> str:
     s, k = c["signal"], c["kode"]
     head = (f"<b>{k}</b> · skor {s['skor']} · harga {fmt(c['close'])} "
             f"({'+' if c['chg_pct'] >= 0 else ''}{dec(c['chg_pct'], 2)}%) · nilai {dec(c['value_miliar'])} M")
+    if s["tipe"] == "BSJP" and (s.get("resep") or "").startswith("AUTO_BSJP"):
+        label = {"plus": "⭐⭐ PLUS · ", "utama": "⭐ UTAMA · ", "cadangan": "▫️ CADANGAN · "}.get(s.get("lapis"), "")
+        return "\n".join([
+            label + head, html.escape(s["alasan"]),
+            f"🟢 <b>Beli SORE INI s.d. 15.49 / post-trading</b> di {fmt(s['beli_bawah'])}–{fmt(s['beli_atas'])}; "
+            f"jangan kejar di atas {fmt(s['jangan_di_atas'])}",
+            "🎯 <b>Jual BESOK PAGI di pembukaan (09.00, harga open)</b>, untung atau rugi.",
+            aturan.teks_stat(s.get("stat", {})), cek_bot("BSJP", k)])
     if s["tipe"] == "BSJP" and (s.get("resep") or "").startswith("BSJP_MOMBB"):
         lapis = s.get("lapis", "utama")
         label, riset = {
@@ -174,7 +189,7 @@ def run_scan():
                 if kode in config.WATCHLIST:           # peringatan exit hanya untuk yang dipegang
                     warnings.append(item)
             elif sig["mode"] == "next_day":
-                bpjs_c.append(item)
+                continue                               # BPJS kini dari aturan riset otomatis (di bawah)
             else:
                 swing_c.append(item)
 
@@ -187,14 +202,19 @@ def run_scan():
         return
     # Abaikan saham yang datanya tidak update (suspend dsb.)
     swing_c = [c for c in swing_c if c["tanggal"] == tanggal]
-    bpjs_c = [c for c in bpjs_c if c["tanggal"] == tanggal]
+    # BPJS (beli open besok, jual close besok) dari aturan hasil riset otomatis
+    try:
+        Fh = aturan.fitur_hari_ini(cache, data.fetch_symbol("^JKSE", "1y"), tanggal)
+        bpjs_c, _ = aturan.sinyal(Fh, "BPJS")
+        for c in bpjs_c:
+            c["id"] = f"{c['kode']}:BPJS"
+    except Exception as e:
+        print(f"[bpjs] aturan gagal: {e}")
+        bpjs_c = []
 
     rank = lambda x: (-x["signal"]["skor"], -x["value_miliar"])
     swing_c.sort(key=rank)
-    if aktif["BPJS"].startswith("BPJS_DIP"):     # riset: paling jatuh 5 hari lebih baik dari paling likuid
-        bpjs_c.sort(key=lambda x: (-x["signal"]["skor"], x.get("ret5", 0)))
-    else:
-        bpjs_c.sort(key=rank)
+    bpjs_c.sort(key=lambda x: (-x["signal"]["skor"], x.get("ret5", 0)))   # lapis tertinggi, lalu paling jatuh
     candidates = (swing_c + bpjs_c)[:config.MAX_AI_CANDIDATES]
 
     picks, ringkasan, ai_ran = None, "", False
@@ -209,8 +229,8 @@ def run_scan():
                 picks = [p for p in result.get("picks", []) if p["id"] in valid]   # guardrail
         except Exception as e:
             print(f"[agent] gagal, pakai sinyal mentah: {e}")
-    dip = aktif["BPJS"].startswith("BPJS_DIP")
-    maks_bpjs = 20 if dip else config.MAX_PER_LIST
+    dip = True                                   # BPJS ditampilkan sebagai daftar keranjang
+    maks_bpjs = 20
     if picks is None:
         picks = [{"id": c["id"], "komentar": ""} for c in swing_c[:config.MAX_SIGNALS * 2]]
         picks += [{"id": c["id"], "komentar": ""} for c in bpjs_c[:maks_bpjs]]
@@ -248,8 +268,8 @@ def run_scan():
     if dip and bpjs_cards:
         parts.append(render_dip_list(bpjs_cards))
     else:
-        parts += bpjs_cards or ["Tidak ada kandidat BPJS (buy the dip hanya muncul saat IHSG turun >1%)."
-                                if dip else "Tidak ada kandidat BPJS."]
+        parts += bpjs_cards or ["Tidak ada kandidat BPJS. Syarat aktif:\n" + "\n".join(
+            f"• {r['lapis']}: {html.escape(fb.label(r['syarat']))}" for r in aturan.rules("BPJS"))]
     parts.append(f"<b>━━ Sinyal swing ({len(swing_cards)}) ━━</b>")
     if pasar.get("ihsg_up50") is False:
         parts.append("⏸ Swing ditahan: IHSG di bawah MA50. Riset 2 tahun: swing rugi saat pasar turun.")
@@ -272,7 +292,7 @@ def run_live(kind: str, uji: bool = False):
     wib = now_wib()
     today = wib.date().isoformat()
     frac = signals.session_fraction(wib - timedelta(minutes=15))     # data Yahoo telat ±15 menit
-    cache = load_data(period="3mo")
+    cache = load_data(period="1y" if kind == "bsjp" else "3mo")
     if uji:
         today = max(str(df.index[-1].date()) for df in cache.values())
         frac = 1.0 if kind == "bsjp" else signals.session_fraction(wib.replace(hour=10, minute=0))
@@ -283,19 +303,17 @@ def run_live(kind: str, uji: bool = False):
         return
 
     semalam = journal.bpjs_semalam(today) if kind == "bpjs" else set()
-    resep_bsjp = strategi.load()["BSJP"]
-    pasar_live = data.ihsg_live() if kind == "bsjp" else {}
-    print(f"[{kind}] IHSG: {pasar_live}")
     hasil, gagal, n_hari_ini = [], {}, 0
-    for kode, df in cache.items():
+    if kind == "bsjp":                      # aturan hasil riset otomatis (strategi.json)
+        n_hari_ini = sum(1 for df in cache.values() if str(df.index[-1].date()) == today)
+        Fh = aturan.fitur_hari_ini(cache, data.fetch_symbol("^JKSE", "1y"), today, frac)
+        hasil, gagal = aturan.sinyal(Fh, "BSJP")
+    for kode, df in (cache.items() if kind == "bpjs" else []):
         if str(df.index[-1].date()) != today:
             continue
         n_hari_ini += 1
         try:
-            r = signals.bpjs_live(kode, df, frac, semalam) if kind == "bpjs" else signals.bsjp(kode, df, frac, resep_bsjp, pasar_live)
-            if not r and kind == "bsjp":
-                for alasan in signals.bsjp_diagnosa(df, frac, resep_bsjp):
-                    gagal[alasan] = gagal.get(alasan, 0) + 1
+            r = signals.bpjs_live(kode, df, frac, semalam)
         except Exception as e:
             print(f"[{kind}] {kode} dilewati: {e}")
             continue
@@ -446,6 +464,9 @@ if __name__ == "__main__":
         import os
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "laporan_riset.txt")) as fh:
             telegram_send.send(fh.read().strip())
+    elif cmd == "riset-otomatis":
+        import riset_otomatis
+        riset_otomatis.run()
     elif cmd == "evaluasi":
         import evaluasi
         evaluasi.run()

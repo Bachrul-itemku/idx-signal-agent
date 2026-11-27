@@ -70,26 +70,7 @@ def backtest(cache: dict) -> tuple[dict, str, int]:
             b["ihsg_ret5"] = pasar.get(tgl, {}).get("ihsg_ret5", 0)
             if b["c"] < config.MIN_PRICE or not (b["val_avg"] >= config.MIN_VALUE_MILIAR):
                 continue
-            # BSJP
-            for nama in recipes.BSJP:
-                r = signals.bsjp_dari_bar(kode, b, nama)
-                if r:
-                    res = journal._evaluate(_row(r), df)
-                    if res:
-                        trades[("BSJP", nama)].append((tgl, res["result_pct"] - config.FEE_PCT))
-            # BPJS malam (eksekusi besok pagi)
             ps = pasar.get(tgl, {})
-            f = signals._filters(dfe.iloc[:i + 1], ps)
-            if f["TERKUNCI"]:
-                continue
-            for nama, (_, fn) in recipes.BPJS.items():
-                if fn(f):
-                    r = {"tanggal": tgl, "close": b["c"],
-                         "signal": {**signals.plan_bpjs(b["c"]), "mode": "next_day", "tipe": "BPJS",
-                                    "resep": nama}}
-                    res = journal._evaluate(_row(r), df)
-                    if res and res["status"] != "SKIP":
-                        trades[("BPJS", nama)].append((tgl, res["result_pct"] - config.FEE_PCT))
             # Swing (tiap 3 hari supaya cepat)
             if (i - start) % 3 == 0:
                 info = signals.analyze(kode, df.iloc[max(0, i - 259):i + 1], aktif=None, pasar=ps)
@@ -105,10 +86,6 @@ def backtest(cache: dict) -> tuple[dict, str, int]:
     hari = sorted(tanggal_uji)
     batas_4m = hari[-20] if len(hari) >= 20 else (hari[0] if hari else "")
     hasil = {k: _metrics(v, batas_4m) for k, v in trades.items()}
-    for nama in recipes.BSJP:
-        hasil.setdefault(("BSJP", nama), _metrics([], batas_4m))
-    for nama in recipes.BPJS:
-        hasil.setdefault(("BPJS", nama), _metrics([], batas_4m))
     for t in recipes.SWING_SEMUA:
         hasil.setdefault(("SWING", t), _metrics([], batas_4m))
     print(f"[evaluasi] backtest selesai {len(liquid)} saham, {time.time() - t0:.0f} detik")
@@ -166,7 +143,8 @@ def putuskan(aktif: dict, bt: dict, live: dict, today: str) -> tuple[dict, list[
     baru = {**aktif, "SWING": list(aktif["SWING"]), "riwayat": list(aktif.get("riwayat", []))}
     catatan = []
 
-    for kat, live_tipe in (("BSJP", "BSJP"), ("BPJS", "BPJS")):
+    catatan.append("🤖 <b>BSJP &amp; BPJS</b>: dipilih riset otomatis tiap Jumat malam (laporan terpisah).")
+    for kat, live_tipe in ():
         cur = aktif[kat]
         m_cur = bt[(kat, cur)]
         alasan = _menurun(live.get(live_tipe), m_cur)
@@ -258,7 +236,7 @@ def laporan(aktif, baru, bt, live, catatan, today, batas_4m, n_saham) -> str:
     else:
         p.append("<b>━━ Hasil live ━━</b>\nBelum ada trade yang selesai. Keputusan minggu ini memakai backtest.")
 
-    for kat, judul in (("BSJP", "BSJP"), ("BPJS", "BPJS malam")):
+    for kat, judul in ():
         rows = sorted(((m["6b"]["exp"], nama, m) for (k, nama), m in bt.items() if k == kat), reverse=True)
         p.append(f"<b>━━ Backtest {judul} ━━</b>\n" +
                  "\n".join(_baris(nama, m, nama == baru[kat]) for _, nama, m in rows))
