@@ -3,7 +3,6 @@
   "BPJS": "BPJS_DIP2",
   "SWING": [
     "MA_GC",
-    "FR4_BREAKOUT",
     "HBO_VOL",
     "GZ_FIBO"
   ],
@@ -16,6 +15,30 @@
         "BPJS plus",
         "BPJS utama"
       ]
+    },
+    {
+      "tanggal": "2026-11-28",
+      "kategori": "RISET",
+      "ke": [
+        "BSJP utama",
+        "BPJS plus",
+        "BPJS utama"
+      ]
+    },
+    {
+      "tanggal": "2026-11-28",
+      "kategori": "SWING",
+      "dari": {
+        "MA_GC": "bawaan",
+        "FR4_BREAKOUT": "bawaan",
+        "HBO_VOL": "bawaan",
+        "GZ_FIBO": "bawaan"
+      },
+      "ke": {
+        "MA_GC": 1.0,
+        "HBO_VOL": 1.0,
+        "GZ_FIBO": 1.0
+      }
     }
   ],
   "RULES": {
@@ -44,20 +67,21 @@
       {
         "lapis": "utama",
         "syarat": [
-          "bb>1",
-          "naik>4",
-          "rata>=50M",
-          "harga200-1000"
+          "atr>5",
+          "harga<500",
+          "nilai_top10%",
+          "rsi14>70",
+          "up3"
         ],
         "stat": {
-          "n_pilih": 209,
-          "wr_pilih": 0.6794,
-          "ex_pilih": 0.5531,
-          "n_baru": 29,
-          "wr_baru": 0.7241,
-          "ex_baru": 0.7826,
-          "cakupan": 0.301,
-          "skor": 68.2585
+          "n_pilih": 158,
+          "wr_pilih": 0.7405,
+          "ex_pilih": 1.0982,
+          "n_baru": 18,
+          "wr_baru": 0.7778,
+          "ex_baru": 1.366,
+          "cakupan": 0.2485,
+          "skor": 72.0951
         }
       },
       {
@@ -87,17 +111,18 @@
           "bb<0",
           "bukan_jumat",
           "ihsg_turun>2",
-          "nilai_top10%"
+          "nilai_top10%",
+          "rsi14<30"
         ],
         "stat": {
-          "n_pilih": 172,
-          "wr_pilih": 0.657,
-          "ex_pilih": 4.1354,
-          "n_baru": 41,
-          "wr_baru": 0.9024,
-          "ex_baru": 4.8666,
-          "cakupan": 0.0409,
-          "skor": 88.0385
+          "n_pilih": 73,
+          "wr_pilih": 0.7671,
+          "ex_pilih": 5.6887,
+          "n_baru": 31,
+          "wr_baru": 0.9677,
+          "ex_baru": 5.5746,
+          "cakupan": 0.035,
+          "skor": 93.4734
         }
       },
       {
@@ -108,20 +133,26 @@
           "ibs<0.2",
           "ihsg_turun>1",
           "rata>=10M",
-          "turun>4"
+          "turun>4",
+          "turun>6"
         ],
         "stat": {
-          "n_pilih": 464,
-          "wr_pilih": 0.6315,
-          "ex_pilih": 3.0212,
-          "n_baru": 89,
-          "wr_baru": 0.6966,
-          "ex_baru": 2.8505,
-          "cakupan": 0.1342,
-          "skor": 75.4895
+          "n_pilih": 338,
+          "wr_pilih": 0.6598,
+          "ex_pilih": 3.9868,
+          "n_baru": 63,
+          "wr_baru": 0.6825,
+          "ex_baru": 3.5936,
+          "cakupan": 0.1206,
+          "skor": 77.9605
         }
       }
     ]
   },
-  "riset_terakhir": "2026-11-27"
+  "riset_terakhir": "2026-11-28",
+  "SWING_TP": {
+    "MA_GC": 1.0,
+    "HBO_VOL": 1.0,
+    "GZ_FIBO": 1.0
+  }
 }
